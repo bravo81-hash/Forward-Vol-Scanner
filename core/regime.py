@@ -6,6 +6,7 @@ OPTION_IMPLIED_VOLATILITY, one cached request; mock: synthetic).
 from __future__ import annotations
 import math
 import random
+import zlib
 from datetime import date, timedelta
 
 ADX_THR = 20
@@ -133,7 +134,9 @@ def build_gates(reg: dict, ev: dict) -> list[dict]:
 
 # -------------------------------------------------------------------- mock --
 def mock_bars(symbol: str, spot: float, today: date, n=300, seed=None) -> list:
-    rnd = random.Random(seed if seed is not None else hash(symbol) & 0xffff)
+    # zlib.crc32 is stable across processes; hash() is salted per run and
+    # made mock regimes (and the test suite) nondeterministic
+    rnd = random.Random(seed if seed is not None else zlib.crc32(symbol.encode()) & 0xffff)
     drift, vol = 0.0003, {"SPX": .010, "SPY": .010, "QQQ": .013,
                           "NDX": .013, "RUT": .014, "IWM": .014}[symbol]
     c = spot / math.exp(n * drift)
