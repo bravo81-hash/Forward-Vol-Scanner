@@ -44,14 +44,18 @@ def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], 
     ib.qualifyContracts(und)
 
     q = quote_many(ib, [und], want_greeks=False, timeout=4)
+
+    def _px(v):  # indices premarket tick nan, and nan is truthy — filter it
+        return v if v and not (isinstance(v, float) and math.isnan(v)) and v > 0 else None
+
     spot = (q.get(und.conId) or {}).get("mid")
     if not spot:
         t = ib.reqMktData(und, "", snapshot=False)
         ib.sleep(2)
-        spot = t.last or t.close
+        spot = _px(t.last) or _px(t.close) or _px(t.marketPrice())
         ib.cancelMktData(und)
     if not spot:
-        raise RuntimeError(f"{symbol}: no spot")
+        raise RuntimeError(f"{symbol}: no spot (index may not tick premarket)")
 
     pkey = ("params", symbol)
     chain = PARAMS_CACHE.get(pkey)
@@ -66,6 +70,9 @@ def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], 
         if SCAN_DTE[0] <= (d - today).days <= SCAN_DTE[1] and d.weekday() == 4:
             expiries.append(d)            # Fridays only — keeps lines low
     strikes = sorted(k for k in chain.strikes if 0.8 * spot < k < 1.2 * spot)
+    if not expiries or not strikes:
+        raise RuntimeError(f"{symbol}: no expiries/strikes in scan window "
+                           f"(spot {spot:g})")
 
     def snap(x):
         return min(strikes, key=lambda s: abs(s - x))

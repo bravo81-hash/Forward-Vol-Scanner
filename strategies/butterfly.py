@@ -10,7 +10,7 @@ class Butterfly(Strategy):
 
     def propose(self, ctx: Context) -> list[Suggestion]:
         out = []
-        if ctx.events["opex_week"] and ctx.regime["gamma"] == "+g":
+        if ctx.events["opex_week"] and ctx.regime["gamma"] == "+g" and ctx.slices:
             ox = datetime.strptime(ctx.events["opex_date"], "%Y-%m-%d").date()
             slc = next((s for s in ctx.slices if s.expiry == ox), None) or \
                   min(ctx.slices, key=lambda s: abs((s.expiry - ox).days))
