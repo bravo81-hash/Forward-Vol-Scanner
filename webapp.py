@@ -22,6 +22,7 @@ from core.ib_client import DEFAULT_HOST, DEFAULT_PORT, with_ib
 from core.models import Leg
 from core.pricing import struct_value
 from core.reprice import reprice_cards
+from core.walls import scan_walls
 from execution.stage import stage_suggestion
 from portfolio.accounts import MOCK_ACCOUNTS, list_accounts
 from portfolio.book import book_greeks, fetch_positions
@@ -73,11 +74,13 @@ def api_suggest():
             ctx.book["nlv"] = nlv
         out = shortlist(ctx)
         if mode == "live" and out["cards"]:
-            try:                                 # swap model mids for NBBO
-                with_ib(lambda ib: reprice_cards(ib, symbol, ctx.spot,
-                                                 ctx.today, out["cards"]))
-            except Exception as e:               # keep model prices on failure
-                out["reprice_error"] = str(e)
+            def enrich(ib):                      # one connection for both
+                reprice_cards(ib, symbol, ctx.spot, ctx.today, out["cards"])
+                return scan_walls(ib, symbol, ctx, out["cards"])
+            try:                                 # NBBO mids + OI walls
+                out["walls"] = with_ib(enrich)
+            except Exception as e:               # keep model values on failure
+                out["enrich_error"] = str(e)
         out["spot"] = ctx.spot
         out["mode"] = mode
         out["book"] = ctx.book

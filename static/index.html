@@ -91,7 +91,8 @@ function render(d){
   <span class="chip">VRP <b>${fmt(r.vrp,1)}v</b> rv21 ${r.rv21}</span>
   <span class="chip">curve <b>${t.verdict||"—"}</b> 9/30 ${t.rat_front||"—"}</span>
   <span class="chip">bias <b>${fmt(r.bias,0)}</b></span>
-  <span class="chip">FOMC <b>d-${d.events.fomc_dte}</b>${d.events.opex_week?" · OpEx wk":""}${d.events.post_opex?" · post-OpEx":""}</span></div>`;
+  <span class="chip">FOMC <b>d-${d.events.fomc_dte}</b>${d.events.opex_week?" · OpEx wk":""}${d.events.post_opex?" · post-OpEx":""}</span>${
+  d.walls?`<span class="chip">OI ${d.walls.expiry.slice(5)}: put wall <b>${d.walls.put_wall.strike}</b> · call wall <b>${d.walls.call_wall.strike}</b> · pin <b>${d.walls.pin.strike}</b> · GEX <b>${d.walls.gex_sign}</b></span>`:""}</div>`;
  if(d.gates.length)h+=`<div class="warnbox">${d.gates.map(g=>(g.hard?"⛔ ":"⚠ ")+g.msg).join("<br>")}</div>`;
  if(d.book&&d.book.greeks){const g=d.book.greeks;
   h+=`<div class="bookbar">BOOK ${SYM}: ${d.book.positions} legs · Δ ${fmt(g.delta)} γ ${fmt(g.gamma,3)} θ ${fmt(g.theta)} ν ${fmt(g.vega)}`+
