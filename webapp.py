@@ -21,6 +21,7 @@ from core.context import build_context
 from core.ib_client import DEFAULT_HOST, DEFAULT_PORT, with_ib
 from core.models import Leg
 from core.pricing import struct_value
+from core.reprice import reprice_cards
 from execution.stage import stage_suggestion
 from portfolio.accounts import MOCK_ACCOUNTS, list_accounts
 from portfolio.book import book_greeks, fetch_positions
@@ -71,6 +72,12 @@ def api_suggest():
             ctx.book["account"] = account
             ctx.book["nlv"] = nlv
         out = shortlist(ctx)
+        if mode == "live" and out["cards"]:
+            try:                                 # swap model mids for NBBO
+                with_ib(lambda ib: reprice_cards(ib, symbol, ctx.spot,
+                                                 ctx.today, out["cards"]))
+            except Exception as e:               # keep model prices on failure
+                out["reprice_error"] = str(e)
         out["spot"] = ctx.spot
         out["mode"] = mode
         out["book"] = ctx.book
@@ -89,7 +96,8 @@ def api_payoff():
     legs = [Leg(cp=l["cp"], strike=float(l["strike"]),
                 expiry=date.fromisoformat(l["expiry"]), qty=int(l["qty"]),
                 iv=float(l.get("iv") or 0.18)) for l in d["legs"]]
-    entry = struct_value(spot, legs, today)
+    entry = (float(d["net_mid"]) if d.get("net_mid") is not None
+             else struct_value(spot, legs, today))
     front = min((l.expiry - today).days for l in legs)
     xs, exp, now = [], [], []
     s = spot * 0.90

@@ -101,8 +101,12 @@ def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT
         for c, t in tickers:
             bid, ask = val(t.bid), val(t.ask)
             mid = round((bid + ask) / 2, 4) if bid and ask else None
-            iv = t.modelGreeks.impliedVol if t.modelGreeks else None
-            res[c.conId] = {"bid": bid, "ask": ask, "mid": mid,
+            mg = t.modelGreeks
+            iv = mg.impliedVol if mg else None
+            greeks = ({"delta": mg.delta, "gamma": mg.gamma,
+                       "theta": mg.theta, "vega": mg.vega}
+                      if mg and mg.delta is not None else None)
+            res[c.conId] = {"bid": bid, "ask": ask, "mid": mid, "greeks": greeks,
                             "iv": iv if iv and 0.01 < iv < 3 else None,
                             "oi": getattr(t, "openInterest", None) or
                                   getattr(t, "putOpenInterest", None) or

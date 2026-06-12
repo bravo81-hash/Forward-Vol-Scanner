@@ -58,9 +58,12 @@ def struct_greeks(spot: float, legs: list[Leg], today: date) -> dict:
     return {k: round(v, 4) for k, v in out.items()}
 
 
-def struct_metrics(spot: float, legs: list[Leg], today: date) -> dict:
-    """Entry mid (model), max P/L and breakevens AT FRONT EXPIRY, hold-aware."""
-    entry = struct_value(spot, legs, today)
+def struct_metrics(spot: float, legs: list[Leg], today: date,
+                   entry: float | None = None) -> dict:
+    """Entry mid (model unless overridden with a live mid), max P/L and
+    breakevens AT FRONT EXPIRY, hold-aware."""
+    if entry is None:
+        entry = struct_value(spot, legs, today)
     front = min((l.expiry - today).days for l in legs)
     max_p, max_l, bes, prev = -1e18, 1e18, [], None
     lo, hi = spot * 0.82, spot * 1.18

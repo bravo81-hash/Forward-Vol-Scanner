@@ -106,7 +106,7 @@ function card(c,i){
   <div class="fam">${c.strategy}</div><h3>${c.label}</h3>
   <div class="legs">${c.legs.join("<br>")}</div>
   <div class="nums">
-   <span><b>${cr?"credit":"debit"}</b><span class="amb">${Math.abs(c.net_mid).toFixed(2)}</span></span>
+   <span><b>${cr?"credit":"debit"} (${c.mid_src||"model"})</b><span class="amb">${Math.abs(c.net_mid).toFixed(2)}</span></span>
    <span><b>max P</b><span class="pos">${fmt(c.max_profit,1)}</span></span>
    <span><b>max L</b><span class="neg">${fmt(c.max_loss,1)}</span></span>
    <span><b>BEs</b>${(c.breakevens||[]).join(" / ")||"—"}</span>
@@ -133,7 +133,7 @@ function openOS(i){window.open(osUrl(LAST.cards[i]),"_blank");}
 async function payoff(i){
  const c=LAST.cards[i];
  const r=await fetch("/api/payoff",{method:"POST",headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({spot:LAST.spot,legs:c.legs_raw})});
+  body:JSON.stringify({spot:LAST.spot,legs:c.legs_raw,net_mid:c.net_mid})});
  const d=await r.json();const W=420,H=170,pl=44,pb=18;
  const ymax=Math.max(...d.expiry,...d.t5,1),ymin=Math.min(...d.expiry,...d.t5,-1);
  const X=j=>pl+j/(d.x.length-1)*(W-pl-6),Y=p=>6+(ymax-p)/(ymax-ymin)*(H-pb-12);
