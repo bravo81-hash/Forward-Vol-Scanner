@@ -53,6 +53,8 @@ class Suggestion:
 
     def to_dict(self) -> dict:
         d = self.__dict__.copy()
+        d["score"] = round(self.score, 2)
+        d["fit"] = round(self.fit, 2)
         d["legs"] = [l.key() for l in self.legs]
         d["legs_raw"] = [{"cp": l.cp, "strike": l.strike,
                           "expiry": l.expiry.isoformat(), "qty": l.qty, "iv": round(l.iv, 4)}
