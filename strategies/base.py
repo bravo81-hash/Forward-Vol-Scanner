@@ -27,16 +27,46 @@ class Strategy(ABC):
         return Leg(cp=cp, strike=k, expiry=slc.expiry, qty=qty, iv=iv_at(slc, k))
 
     def make(self, ctx: Context, label: str, legs: list[Leg],
-             score: float, rationale: list[str]) -> Suggestion:
+             score: float, rationale: list[str],
+             delta_band: tuple[float, float] | None = None,
+             gamma_test: bool = True) -> Suggestion:
         m = struct_metrics(ctx.spot, legs, ctx.today)
         g = struct_greeks(ctx.spot, legs, ctx.today)
         liq = self.liquidity_pen(ctx, legs)
-        return Suggestion(strategy=self.key, label=label, legs=legs,
-                          net_mid=m["entry"], greeks=g,
-                          max_profit=m["max_profit"], max_loss=m["max_loss"],
-                          breakevens=m["breakevens"],
-                          score=round(score - liq, 3), rationale=rationale,
-                          liquidity_pen=round(liq, 3))
+        s = Suggestion(strategy=self.key, label=label, legs=legs,
+                       net_mid=m["entry"], greeks=g,
+                       max_profit=m["max_profit"], max_loss=m["max_loss"],
+                       breakevens=m["breakevens"],
+                       score=round(score - liq, 3), rationale=rationale,
+                       liquidity_pen=round(liq, 3))
+        self._check_targets(ctx, s, delta_band or self.delta_band, gamma_test)
+        return s
+
+    delta_band: tuple[float, float] | None = None
+
+    def _check_targets(self, ctx: Context, s: Suggestion,
+                       band: tuple[float, float] | None, gamma_test: bool):
+        """Entry-Greeks targets (mirrors the playbook guide tables).
+        Off-target -> rationale flag + score penalty, never a hard block."""
+        flags = []
+        if band:
+            lo, hi = band
+            d = s.greeks["delta"]
+            if not lo <= d <= hi:
+                lever = ("shift strike toward the band" if self.key in
+                         ("calendar", "double_calendar", "diagonal")
+                         else "recenter shorts / rebalance by delta")
+                flags.append(f"Δ {d:+.2f} outside target {lo:+.2f}..{hi:+.2f} — {lever}")
+        if gamma_test and s.greeks["theta"] > 0:
+            em1 = ctx.spot * ctx.regime["rv21"] / 100 / math.sqrt(252)
+            gloss = 0.5 * abs(s.greeks["gamma"]) * em1 * em1
+            if gloss > s.greeks["theta"]:
+                flags.append(f"Gamma breakeven FAILS: avg-day gamma loss "
+                             f"{gloss:.2f} > theta {s.greeks['theta']:.2f} — "
+                             "push expiry out or widen")
+        for f in flags:
+            s.rationale.append("TARGET: " + f)
+        s.score = round(s.score - 0.4 * len(flags), 3)
 
     @staticmethod
     def liquidity_pen(ctx: Context, legs: list[Leg]) -> float:

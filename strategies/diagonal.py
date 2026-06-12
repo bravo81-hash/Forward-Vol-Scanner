@@ -20,10 +20,11 @@ class Diagonal(Strategy):
             k_long = ctx.snap(ctx.spot + sgn * lk * em)
             k_short = ctx.snap(ctx.spot + sgn * sk * em)
             legs = [self.leg(ctx, b, cp, k_long, +1), self.leg(ctx, f, cp, k_short, -1)]
+            band = (0.10, 0.25) if up else (-0.25, -0.10)
             why = [f"{'Call' if up else 'Put'} side with trend ({ctx.regime['trend']}, bias {ctx.regime['bias']:+d})",
                    f"Short {f.dte}d {k_short:g} sits outside the {f.dte}d EM ({em:.0f} pts)",
                    f"Pair curve edge {p['edge']:+.2f}v"]
             out.append(self.make(ctx, f"{cp} diagonal {lbl}", legs,
                                  score=p["edge"] * 0.8 + abs(ctx.regime["bias"]) * 0.3,
-                                 rationale=why))
+                                 rationale=why, delta_band=band))
         return out

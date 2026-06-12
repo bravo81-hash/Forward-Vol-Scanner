@@ -18,7 +18,8 @@ class Butterfly(Strategy):
             k = ctx.snap(ctx.spot)
             legs = [self.leg(ctx, slc, "C", k - w, +1), self.leg(ctx, slc, "C", k, -2),
                     self.leg(ctx, slc, "C", k + w, +1)]
-            sug = self.make(ctx, f"Pin fly @ {k:g} OpEx", legs, 0.0, [])
+            sug = self.make(ctx, f"Pin fly @ {k:g} OpEx", legs, 0.0, [],
+                            delta_band=(-0.05, 0.05), gamma_test=False)
             sug.rationale = [f"OpEx pin candidate at {k:g}, wings {w:g}",
                              f"Debit {sug.net_mid:.2f} vs max {sug.max_profit:.2f} — "
                              f"{(sug.max_profit / max(sug.net_mid, .01)):.1f}x if pinned",
@@ -34,7 +35,8 @@ class Butterfly(Strategy):
             legs = [self.leg(ctx, slc, "P", ctx.snap(body + w), +1),
                     self.leg(ctx, slc, "P", body, -2),
                     self.leg(ctx, slc, "P", ctx.snap(body - w), +1)]
-            sug = self.make(ctx, f"OTM put fly {slc.dte}d body {body:g}", legs, 0.0, [])
+            sug = self.make(ctx, f"OTM put fly {slc.dte}d body {body:g}", legs, 0.0, [],
+                            delta_band=(-0.08, -0.03), gamma_test=False)
             sug.rationale = [f"Body at lower EM edge — where a normal down-move lands",
                              f"Debit {sug.net_mid:.2f} for max {sug.max_profit:.2f}",
                              f"Bias {ctx.regime['bias']:+d} — drift-down convexity"]

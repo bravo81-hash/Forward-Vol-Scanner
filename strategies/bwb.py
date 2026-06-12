@@ -4,6 +4,7 @@ from .base import Strategy
 
 class PutBWB(Strategy):
     key, name = "bwb", "Put BWB"
+    delta_band = (0.02, 0.10)
 
     def propose(self, ctx: Context) -> list[Suggestion]:
         slc = self.single_expiry(ctx)

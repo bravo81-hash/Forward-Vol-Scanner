@@ -108,3 +108,32 @@ def test_accounts_endpoint_mock():
     cl = webapp.app.test_client()
     a = cl.get("/api/accounts?mode=mock").get_json()
     assert a and a[0]["account"] == "MOCK-A"
+
+
+def test_target_flags_emitted():
+    """Off-band delta and failed gamma-breakeven must both emit TARGET flags."""
+    from core.context import build_context
+    from core.models import Suggestion
+    from strategies import REGISTRY
+    ctx = build_context("SPX", "mock", TODAY)
+    cal = REGISTRY["calendar"]
+    s = Suggestion("calendar", "x", [], 10.0,
+                   {"delta": 0.30, "gamma": -0.05, "theta": 0.10, "vega": 2.0},
+                   1, -1, [], 1.0, [])
+    cal._check_targets(ctx, s, cal.delta_band, True)
+    flags = [r for r in s.rationale if r.startswith("TARGET:")]
+    assert len(flags) == 2          # delta out of band AND gamma test fails
+    assert s.score < 1.0            # penalised
+
+
+def test_targets_clean_pass():
+    from core.context import build_context
+    from core.models import Suggestion
+    from strategies import REGISTRY
+    ctx = build_context("SPX", "mock", TODAY)
+    cal = REGISTRY["calendar"]
+    s = Suggestion("calendar", "x", [], 10.0,
+                   {"delta": 0.02, "gamma": -0.0005, "theta": 1.0, "vega": 2.5},
+                   1, -1, [], 1.0, [])
+    cal._check_targets(ctx, s, cal.delta_band, True)
+    assert not any(r.startswith("TARGET:") for r in s.rationale)

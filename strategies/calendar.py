@@ -4,6 +4,7 @@ from .base import Strategy
 
 class Calendar(Strategy):
     key, name = "calendar", "Calendar"
+    delta_band = (-0.10, 0.10)
 
     def propose(self, ctx: Context) -> list[Suggestion]:
         out = []

@@ -4,6 +4,7 @@ from .base import Strategy
 
 class IronCondor(Strategy):
     key, name = "condor", "Iron condor"
+    delta_band = (-0.05, 0.05)
 
     def propose(self, ctx: Context) -> list[Suggestion]:
         slc = self.single_expiry(ctx)

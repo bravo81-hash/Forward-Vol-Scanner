@@ -4,6 +4,7 @@ from .base import Strategy
 
 class DoubleCalendar(Strategy):
     key, name = "double_calendar", "Double calendar"
+    delta_band = (-0.05, 0.05)
 
     def propose(self, ctx: Context) -> list[Suggestion]:
         if not ctx.pairs:
