@@ -232,6 +232,42 @@ def test_campaign_legs_excluded():
     assert b["greeks"] == book_greeks(ctx, pos[:1])["greeks"]
 
 
+# ------------------------------------------------ NY timezone anchor ---------
+
+def test_trading_today_tz(monkeypatch):
+    """A Melbourne Saturday morning (07:00 AEST) is still Friday in New York."""
+    from datetime import date as D
+    from zoneinfo import ZoneInfo
+    import datetime as _dt
+    import core.events as ce
+
+    # 2026-06-27 07:00 AEST  ==  2026-06-26 21:00 UTC  ==  2026-06-26 17:00 EDT
+    mel_tz = ZoneInfo("Australia/Melbourne")
+    aware_mel = _dt.datetime(2026, 6, 27, 7, 0, tzinfo=mel_tz)
+
+    class _FakeDT:
+        @staticmethod
+        def now(tz=None):
+            return aware_mel.astimezone(tz) if tz else aware_mel
+
+    monkeypatch.setattr(ce, "datetime", _FakeDT)
+    assert ce.trading_today() == D(2026, 6, 26)   # Friday in New York
+
+
+def test_friday_gate_ny_anchored():
+    """build_gates fires W on NY Friday, silent on NY Thursday."""
+    from core.regime import build_gates
+    regime = {"vrp": 1.0, "iv_chg_pct": 0.0, "vol_state": "NRM",
+              "gamma": "+g", "term": {"verdict": "FLAT"}, "trend": "RNG",
+              "adx": 20, "iv_pctl": 40, "rv21": 12, "bias": 0}
+    events = {"fomc_dte": 30, "fomc_in_front": False,
+              "opex_week": False, "post_opex": False, "ex_div": False}
+    gates_fri = build_gates(regime, events, date(2026, 6, 26))   # Friday
+    assert any(g["code"] == "W" for g in gates_fri)
+    gates_thu = build_gates(regime, events, date(2026, 6, 25))   # Thursday
+    assert not any(g["code"] == "W" for g in gates_thu)
+
+
 def test_stress_book_direction():
     from datetime import timedelta
     from core.context import build_context

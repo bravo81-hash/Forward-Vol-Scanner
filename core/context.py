@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 
 from .chain import SURFACE_CFG, build_chain_live, build_chain_mock
-from .events import event_flags
+from .events import event_flags, trading_today
 from .ib_client import BARS_CACHE, daily_bars, with_ib
 from .models import Context
 from .regime import build_gates, compute_regime, mock_bars, mock_iv_hist
@@ -17,7 +17,7 @@ from .surface import FRONT_DTE, pair_table, term_stats
 
 def build_context(symbol: str, mode: str = "mock", today: date | None = None,
                   host=None, port=None) -> Context:
-    today = today or date.today()
+    today = today or trading_today()
     if mode == "mock":
         spot, slices, strikes = build_chain_mock(symbol, today)
         bars = mock_bars(symbol, spot, today)

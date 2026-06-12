@@ -18,6 +18,7 @@ from datetime import date
 from flask import Flask, jsonify, request, send_from_directory
 
 from core.context import build_context
+from core.events import trading_today
 from core.ib_client import DEFAULT_HOST, DEFAULT_PORT, with_ib
 from core.models import Leg
 from core.pricing import struct_value
@@ -97,7 +98,7 @@ def api_suggest():
 @app.post("/api/payoff")
 def api_payoff():
     d = request.get_json(force=True)
-    spot, today = float(d["spot"]), date.today()
+    spot, today = float(d["spot"]), trading_today()
     legs = [Leg(cp=l["cp"], strike=float(l["strike"]),
                 expiry=date.fromisoformat(l["expiry"]), qty=int(l["qty"]),
                 iv=float(l.get("iv") or 0.18)) for l in d["legs"]]

@@ -1,6 +1,15 @@
 """Embedded event calendar + OpEx/ex-div math. UPDATE FOMC EACH JANUARY."""
 from __future__ import annotations
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+US_TZ = ZoneInfo("America/New_York")
+
+
+def trading_today() -> date:
+    """Current date in New York — the date all DTE/event/cadence logic must
+    use, regardless of server timezone."""
+    return datetime.now(US_TZ).date()
 
 FOMC_2026 = [date(2026, 1, 28), date(2026, 3, 18), date(2026, 4, 29),
              date(2026, 6, 17), date(2026, 7, 29), date(2026, 9, 16),

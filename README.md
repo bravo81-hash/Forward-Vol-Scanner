@@ -15,6 +15,8 @@ python webapp.py            # -> http://127.0.0.1:8765
 Mock mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
 (edit `core/ib_client.py`).
 
+All trading-date logic anchored to America/New_York via `core.events.trading_today()`.
+
 ## Layout
 ```
 core/        models · pricing (BS) · ib_client (pacing/caches) · chain ·

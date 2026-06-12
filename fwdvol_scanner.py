@@ -26,6 +26,7 @@ import math
 import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from core.events import trading_today
 
 import numpy as np
 import pandas as pd
@@ -225,7 +226,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="synthetic IVs, no TWS")
     args = ap.parse_args()
 
-    today = date.today()
+    today = trading_today()
     pd.set_option("display.width", 160)
 
     ib = None
