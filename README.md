@@ -12,7 +12,7 @@ OptionNet Explorer by design — this app only selects and stages.
 pip install flask ib_insync
 python webapp.py            # -> http://127.0.0.1:8765
 ```
-Mock mode works with no TWS. Live mode expects TWS on 192.168.0.185:7496
+Mock mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
 (edit `core/ib_client.py`).
 
 ## Layout

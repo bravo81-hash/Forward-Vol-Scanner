@@ -17,8 +17,8 @@ MAX_LINES = 40        # concurrent market-data lines per batch (default cap is ~
 PACE_S = 0.05         # gap between request submits (50 msg/s API ceiling)
 QUOTE_TIMEOUT = 8.0
 
-DEFAULT_HOST = "192.168.0.185"
-DEFAULT_PORT = 7496
+DEFAULT_HOST = "127.0.0.1"    # TWS on this machine
+DEFAULT_PORT = 7496           # 7497 = paper
 _client_ids = iter(lambda: int(time.time() * 10) % 800 + 100, None)
 
 
