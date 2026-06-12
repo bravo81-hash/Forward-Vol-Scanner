@@ -7,9 +7,11 @@ from core.models import Context, Leg
 from core.pricing import struct_greeks
 
 
-def fetch_positions(ib, symbol: str) -> list[dict]:
+def fetch_positions(ib, symbol: str, account: str | None = None) -> list[dict]:
     out = []
     for p in ib.positions():
+        if account and p.account != account:
+            continue
         c = p.contract
         if c.secType in ("OPT", "FOP") and c.symbol == symbol and p.position:
             out.append({"cp": c.right, "strike": float(c.strike),

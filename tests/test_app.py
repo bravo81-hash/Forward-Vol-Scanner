@@ -95,3 +95,16 @@ def test_web_endpoints_mock():
         s = cl.post("/api/stage", json={"symbol": "QQQ", "mode": "mock",
                                         "legs": c["legs_raw"], "net_mid": c["net_mid"]}).get_json()
         assert s["status"] == "MockStaged"
+
+
+def test_budget_scaling():
+    from portfolio.risk import budget_for
+    assert budget_for(400_000)["vega"] == 4 * budget_for(100_000)["vega"]
+    assert budget_for(None)["vega"] == budget_for(100_000)["vega"]
+
+
+def test_accounts_endpoint_mock():
+    import webapp
+    cl = webapp.app.test_client()
+    a = cl.get("/api/accounts?mode=mock").get_json()
+    assert a and a[0]["account"] == "MOCK-A"

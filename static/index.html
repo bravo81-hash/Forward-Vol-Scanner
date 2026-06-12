@@ -48,6 +48,7 @@ padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:
  <span class="tabs" id="tabs"></span>
  <span class="modes" id="modes">
    <button data-m="mock" class="on">mock</button><button data-m="live">live</button></span>
+ <select id="acct" style="background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:6px"></select>
  <button id="scan">Scan</button>
  <span id="status">idle</span>
 </header>
@@ -55,20 +56,26 @@ padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:
 <div class="toast" id="toast"></div>
 <script>
 "use strict";
-const SYMS=["SPX","SPY","QQQ","RUT","IWM"];let SYM="SPX",MODE="mock",LAST=null;
+const SYMS=["SPX","SPY","QQQ","RUT","IWM"];let SYM="SPX",MODE="mock",LAST=null,ACCTS=[];
+async function loadAccts(){
+ try{const r=await fetch(`/api/accounts?mode=${MODE}`);ACCTS=await r.json();
+  if(ACCTS.error)throw 0;}catch(e){ACCTS=[];}
+ $("acct").innerHTML=ACCTS.map(a=>`<option value="${a.account}" data-nlv="${a.nlv||''}">${a.account}${a.nlv?` ($${Math.round(a.nlv/1000)}k)`:''}</option>`).join("")||'<option value="">no accounts</option>';
+}
+function acct(){const o=$("acct").selectedOptions[0];return o?{account:o.value,nlv:o.dataset.nlv}:{account:"",nlv:""};}
 const $=id=>document.getElementById(id);
 $("tabs").innerHTML=SYMS.map(s=>`<button data-s="${s}" class="${s===SYM?'on':''}">${s}</button>`).join("");
 $("tabs").onclick=e=>{const b=e.target.closest("button");if(!b)return;SYM=b.dataset.s;
  document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x.dataset.s===SYM));scan();};
 $("modes").onclick=e=>{const b=e.target.closest("button");if(!b)return;MODE=b.dataset.m;
- document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",x.dataset.m===MODE));};
+ document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",x.dataset.m===MODE));loadAccts();};
 $("scan").onclick=()=>scan();
 function toast(t){const e=$("toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",6000);}
 function fmt(x,d=2){return(x>=0?"+":"")+(+x).toFixed(d);}
 async function scan(){
  $("status").textContent="scanning "+SYM+" ("+MODE+")…";
  try{
-  const r=await fetch(`/api/suggest?symbol=${SYM}&mode=${MODE}`);const d=await r.json();
+  const a=acct();const r=await fetch(`/api/suggest?symbol=${SYM}&mode=${MODE}&account=${a.account}&nlv=${a.nlv}`);const d=await r.json();
   if(d.error)throw new Error(d.error);LAST=d;render(d);
   $("status").textContent=`${SYM} spot ${d.spot} · ${MODE} · ${new Date().toLocaleTimeString()}`;
  }catch(e){$("status").textContent="error";toast("Scan failed: "+e.message);}
@@ -131,12 +138,12 @@ async function payoff(i){
 }
 async function stage(i){
  const c=LAST.cards[i];
- if(!confirm(`Stage ${c.label} (${MODE})?\n${c.legs.join("\n")}\nnet ${c.net_mid}`))return;
+ if(!confirm(`Stage ${c.label} (${MODE} · ${acct().account||"default acct"})?\n${c.legs.join("\n")}\nnet ${c.net_mid}`))return;
  const r=await fetch("/api/stage",{method:"POST",headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({symbol:SYM,mode:MODE,legs:c.legs_raw,net_mid:c.net_mid,qty:1})});
+  body:JSON.stringify({symbol:SYM,mode:MODE,account:acct().account,legs:c.legs_raw,net_mid:c.net_mid,qty:1})});
  const d=await r.json();
  if(d.error)return toast("Stage failed: "+d.error);
  toast(`${d.status} · order ${d.orderId}`+(d.margin_change!=null?` · margin Δ $${(+d.margin_change).toFixed(0)}`:"")+(d.note?" · "+d.note:""));
 }
-scan();
+loadAccts().then(scan);
 </script></body></html>

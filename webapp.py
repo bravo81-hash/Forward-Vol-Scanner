@@ -22,6 +22,7 @@ from core.ib_client import DEFAULT_HOST, DEFAULT_PORT, with_ib
 from core.models import Leg
 from core.pricing import struct_value
 from execution.stage import stage_suggestion
+from portfolio.accounts import MOCK_ACCOUNTS, list_accounts
 from portfolio.book import book_greeks, fetch_positions
 from portfolio.risk import book_warnings
 from selection.ranker import shortlist
@@ -41,19 +42,34 @@ def api_status():
     return jsonify({"symbols": SYMBOLS, "tws": f"{DEFAULT_HOST}:{DEFAULT_PORT}"})
 
 
+@app.get("/api/accounts")
+def api_accounts():
+    if request.args.get("mode", "mock") == "mock":
+        return jsonify(MOCK_ACCOUNTS)
+    try:
+        return jsonify(with_ib(list_accounts))
+    except Exception as e:                       # noqa: BLE001
+        return jsonify({"error": str(e)}), 500
+
+
 @app.get("/api/suggest")
 def api_suggest():
     symbol = request.args.get("symbol", "SPX").upper()
     mode = request.args.get("mode", "mock")
+    account = request.args.get("account") or None
+    nlv = request.args.get("nlv", type=float)
     try:
         ctx = build_context(symbol, mode)
         if mode == "live":
             def job(ib):
-                return fetch_positions(ib, symbol)
+                return fetch_positions(ib, symbol, account)
             try:
                 ctx.book = book_greeks(ctx, with_ib(job))
             except Exception as e:               # book optional, never fatal
                 ctx.book = {"error": str(e)}
+        if isinstance(ctx.book, dict):
+            ctx.book["account"] = account
+            ctx.book["nlv"] = nlv
         out = shortlist(ctx)
         out["spot"] = ctx.spot
         out["mode"] = mode
@@ -90,12 +106,14 @@ def api_stage():
     d = request.get_json(force=True)
     symbol, legs, net = d["symbol"].upper(), d["legs"], float(d["net_mid"])
     qty = int(d.get("qty", 1))
+    account = d.get("account") or None
     if d.get("mode") == "mock":
         log("stage_mock", symbol, d)
         return jsonify({"orderId": -1, "status": "MockStaged", "margin_change": None,
                         "note": "mock mode — nothing sent to TWS"})
     try:
-        res = with_ib(lambda ib: stage_suggestion(ib, symbol, legs, net, qty))
+        res = with_ib(lambda ib: stage_suggestion(ib, symbol, legs, net, qty,
+                                                  account=account))
         log("stage", symbol, {**d, **res})
         return jsonify(res)
     except Exception as e:                       # noqa: BLE001

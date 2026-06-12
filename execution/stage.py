@@ -13,7 +13,8 @@ def _round_tick(x: float, tick: float = 0.05) -> float:
 
 
 def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
-                     qty: int = 1, transmit: bool = False) -> dict:
+                     qty: int = 1, transmit: bool = False,
+                     account: str | None = None) -> dict:
     from ib_insync import ComboLeg, Contract, LimitOrder, Option
     st, exch, tc, is_idx = SURFACE_CFG[symbol]
     opts = []
@@ -35,6 +36,8 @@ def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
     action = "BUY" if net_mid >= 0 else "SELL"
     px = _round_tick(abs(net_mid))
     order = LimitOrder(action, qty, px)
+    if account:
+        order.account = account
     order.transmit = False
     order.whatIf = True
     wi = ib.placeOrder(combo, order)
@@ -48,9 +51,12 @@ def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
     ib.cancelOrder(order)
 
     live = LimitOrder(action, qty, px)
+    if account:
+        live.account = account
     live.transmit = bool(transmit)
     tr = ib.placeOrder(combo, live)
     ib.sleep(1.0)
     return {"orderId": tr.order.orderId, "action": action, "limit": px,
+            "account": account,
             "qty": qty, "margin_change": margin, "transmit": live.transmit,
             "status": tr.orderStatus.status if tr.orderStatus else "Staged"}
