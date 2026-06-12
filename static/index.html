@@ -115,9 +115,21 @@ function card(c,i){
   <ul class="why">${c.rationale.map(x=>`<li>${x}</li>`).join("")}</ul>
   <div class="cbtns">
    <button onclick="payoff(${i})">Risk graph</button>
+   <button onclick="openOS(${i})">OptionStrat ↗</button>
    <button class="stagebtn" onclick="stage(${i})">Stage to TWS</button></div>
   <div id="g${i}"></div></div>`;
 }
+const OCC_ROOT={SPX:"SPXW",RUT:"RUTW"};   // weekly option roots; ETFs use the symbol
+function osUrl(c){
+ const sym=(LAST&&LAST.symbol)||SYM,root=OCC_ROOT[sym]||sym;
+ const legs=c.legs_raw.map(l=>{
+  const d=l.expiry.replaceAll("-","").slice(2);          // 2026-06-26 -> 260626
+  const q=Math.abs(l.qty);
+  return (l.qty<0?"-":"")+"."+root+d+l.cp+(+l.strike)+(q>1?"x"+q:"");
+ }).join(",");
+ return `https://optionstrat.com/build/custom/${sym}/${legs}`;
+}
+function openOS(i){window.open(osUrl(LAST.cards[i]),"_blank");}
 async function payoff(i){
  const c=LAST.cards[i];
  const r=await fetch("/api/payoff",{method:"POST",headers:{"Content-Type":"application/json"},
