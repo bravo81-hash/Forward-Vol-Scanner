@@ -9,6 +9,9 @@ FRONT_DTE = (12, 21)
 BACK_DTE = (26, 45)
 MIN_GAP = 7
 
+FOMC_HIST_MOVE_PCT = 0.9    # SPX FOMC-day |move| averages ~0.8-1.0%
+HARVEST_MIN_RATIO = 1.25    # implied event move must clear hist by this ratio
+
 
 def _iv_near(slices: list[Slice], dte: int) -> float:
     s = min(slices, key=lambda x: abs(x.dte - dte))
@@ -44,6 +47,31 @@ def pair_table(slices: list[Slice], today: date) -> list[dict]:
                          "fomc_in_front": fomc_within(f.expiry, today)})
     rows.sort(key=lambda r: r["edge"], reverse=True)
     return rows
+
+
+def event_premium(slices: list[Slice], today: date, rv21: float) -> dict | None:
+    """Implied FOMC-day move from the IV step across the event.
+
+    f1 = listed expiry immediately BEFORE the next FOMC, f2 = first expiry
+    ON/AFTER it. The variance f2 carries beyond f1, minus rv21 baseline for
+    the non-event days between them, is attributed to the FOMC print.
+    None when FOMC is > 21 days out or either side of the step is missing.
+    """
+    from .events import FOMC_2026
+    fomc = next((d for d in FOMC_2026 if d >= today), None)
+    if fomc is None or (fomc - today).days > 21:
+        return None
+    before = [s for s in slices if s.expiry < fomc]
+    after = [s for s in slices if s.expiry >= fomc]
+    if not before or not after:
+        return None
+    f1 = max(before, key=lambda s: s.expiry)
+    f2 = min(after, key=lambda s: s.expiry)
+    event_var = f2.atm_iv ** 2 * (f2.dte / 365) - f1.atm_iv ** 2 * (f1.dte / 365)
+    baseline_var = (rv21 / 100) ** 2 * max(f2.dte - f1.dte - 1, 0) / 365
+    implied = 100 * math.sqrt(max(event_var - baseline_var, 0))
+    return {"f1": f1, "f2": f2, "implied_move_pct": round(implied, 2),
+            "rich": implied >= HARVEST_MIN_RATIO * FOMC_HIST_MOVE_PCT}
 
 
 def term_stats(slices: list[Slice]) -> dict:

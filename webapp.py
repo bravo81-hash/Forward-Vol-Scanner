@@ -25,7 +25,7 @@ from core.reprice import reprice_cards
 from core.walls import scan_walls
 from execution.stage import stage_suggestion
 from portfolio.accounts import MOCK_ACCOUNTS, list_accounts
-from portfolio.book import book_greeks, fetch_positions
+from portfolio.book import book_greeks, fetch_positions, stress_book
 from portfolio.risk import book_warnings
 from selection.ranker import shortlist
 from store.log import log
@@ -66,7 +66,9 @@ def api_suggest():
             def job(ib):
                 return fetch_positions(ib, symbol, account)
             try:
-                ctx.book = book_greeks(ctx, with_ib(job))
+                pos = with_ib(job)
+                ctx.book = book_greeks(ctx, pos)
+                ctx.book["stress"] = stress_book(ctx, pos)
             except Exception as e:               # book optional, never fatal
                 ctx.book = {"error": str(e)}
         if isinstance(ctx.book, dict):

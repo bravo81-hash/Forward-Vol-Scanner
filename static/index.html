@@ -96,7 +96,11 @@ function render(d){
  if(d.gates.length)h+=`<div class="warnbox">${d.gates.map(g=>(g.hard?"⛔ ":"⚠ ")+g.msg).join("<br>")}</div>`;
  if(d.book&&d.book.greeks){const g=d.book.greeks;
   h+=`<div class="bookbar">BOOK ${SYM}: ${d.book.positions} legs · Δ ${fmt(g.delta)} γ ${fmt(g.gamma,3)} θ ${fmt(g.theta)} ν ${fmt(g.vega)}`+
-   (d.book_warnings.length?` — <span class="neg">${d.book_warnings.join(" · ")}</span>`:"")+`</div>`;}
+   (d.book.excluded_long_dte?` (+${d.book.excluded_long_dte} long-DTE campaign legs excluded)`:"")+
+   (d.book_warnings.length?` — <span class="neg">${d.book_warnings.join(" · ")}</span>`:"")+`</div>`;
+  if(d.book.stress&&d.book.stress.length)
+   h+=`<div class="bookbar">STRESS: ${d.book.stress.map(s=>
+    `${s.name} <span class="${s.pnl<0?'neg':'pos'}">${s.pnl<0?'-':'+'}$${Math.abs(s.pnl).toLocaleString()}</span>`).join(" · ")}</div>`;}
  h+=`<div class="cards">`+d.cards.map((c,i)=>card(c,i)).join("")+`</div>`;
  if(!d.cards.length)h+=`<p style="color:var(--mut)">No candidates — gates blocked all families. Manage existing only.</p>`;
  $("out").innerHTML=h;

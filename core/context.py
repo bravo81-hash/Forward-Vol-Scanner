@@ -54,7 +54,7 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
     ev = event_flags(today, symbol, FRONT_DTE[1])
     ctx = Context(symbol=symbol, spot=spot, today=today, slices=slices,
                   strikes=strikes, regime=reg, events=ev,
-                  gates=build_gates(reg, ev), mode=mode)
+                  gates=build_gates(reg, ev, today), mode=mode)
     ctx.pairs = pair_table(slices, today)
     ctx.regime["term"] = term_stats(slices)
     return ctx

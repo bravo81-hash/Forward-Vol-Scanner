@@ -109,11 +109,15 @@ def compute_regime(bars, iv30_hist, iv30_now: float) -> dict:
             "ccrange": round(rr, 3), "spot": spot}
 
 
-def build_gates(reg: dict, ev: dict) -> list[dict]:
+def build_gates(reg: dict, ev: dict, today: date | None = None) -> list[dict]:
     gates = []
 
     def add(code, msg, hard):
         gates.append({"code": code, "msg": msg, "hard": hard})
+
+    if today is not None and today.weekday() == 4:
+        add("W", "Friday session — Monday-entry doctrine: net-debit long-vega "
+                 "entries only (calendar/diagonal)", False)
 
     if abs(reg["iv_chg_pct"]) > IV_SPIKE_PCT:
         add("V", f"IV moved {reg['iv_chg_pct']:+.1f}% today — surface unsettled", True)

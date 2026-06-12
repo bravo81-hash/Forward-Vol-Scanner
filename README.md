@@ -37,6 +37,26 @@ tests/       mock-mode suite: python -m pytest tests/
 * chain surface cached **5 min**; secdef params cached 6 h
 * staging: N qualifies + 1 whatIf + 1 placeOrder
 
+## Selection guards
+* **FOMC event harvest** — negative VRP normally blocks selling, but when
+  VRP >= -1.5, the front is INVERTED and FOMC is <= 21d out, the implied
+  event move (variance step across the event minus an rv21 baseline,
+  `core/surface.event_premium`) is compared with the ~0.9% historical
+  FOMC-day move; at >= 1.25x richness the app offers EVENT CAL cards that
+  sell the first post-FOMC expiry, with an explicit override: exit within
+  1-2 sessions after FOMC — normal hold and 7-DTE front-exit rules do not
+  apply.
+* **Friday cadence gate** — Monday close is the default entry day. Friday
+  sessions add soft gate W and restrict families to net-debit long-vega
+  structures (calendar / double calendar / diagonal); Friday-close IVs are
+  weekend-discounted and a Friday entry spans two weekends of gap risk.
+* **Campaign scope** — book greeks, budget warnings and fit scores ignore
+  legs more than `CAMPAIGN_MAX_DTE` (60) days out; those belong to the
+  separate long-DTE campaign and are reported as excluded in the book bar.
+* **Stress row** — the book bar shows scenario P&L for the FULL book
+  (campaign legs included): -5% spot/IV+10/2d, -2%/IV+4/1d, +3%/IV-3/2d,
+  valued with the same model pricing as the book greeks.
+
 ## Maintenance
 * `core/events.py` — update FOMC dates each January
 * `portfolio/risk.py` — tune vega/delta/theta budgets to account size

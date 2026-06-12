@@ -137,3 +137,110 @@ def test_targets_clean_pass():
                    1, -1, [], 1.0, [])
     cal._check_targets(ctx, s, cal.delta_band, True)
     assert not any(r.startswith("TARGET:") for r in s.rationale)
+
+
+# ------------------------------------------------ FOMC event harvest --------
+
+def _harvest_ctx(vrp=-0.4):
+    """SPX mock ctx 10d before FOMC 2026-07-29, forced into the harvest gate."""
+    from core.context import build_context
+    from core.regime import build_gates
+    ctx = build_context("SPX", "mock", date(2026, 7, 19))
+    ctx.regime.update(vrp=vrp, rv21=10.0, iv_chg_pct=0.0,
+                      vol_state="NRM", gamma="+g")
+    ctx.regime["term"]["verdict"] = "INVERTED FRONT"
+    ctx.gates = build_gates(ctx.regime, ctx.events, ctx.today)
+    return ctx
+
+
+def test_event_harvest_fires():
+    from selection.ranker import family_priority, shortlist
+    fams, verdict = family_priority(_harvest_ctx())
+    assert any(why.startswith("FOMC harvest") for _, why in fams)
+    assert "event harvest" in verdict
+    sl = shortlist(_harvest_ctx())
+    evs = [c for c in sl["cards"] if c["label"].startswith("EVENT CAL")]
+    assert evs
+    fomc = date(2026, 7, 29)
+    for c in evs:
+        front = min(date.fromisoformat(l["expiry"]) for l in c["legs_raw"])
+        assert front >= fomc
+        assert any("DO NOT apply" in r for r in c["rationale"])
+
+
+def test_event_harvest_blocked_when_thin(monkeypatch):
+    import core.surface as cs
+    from selection.ranker import family_priority
+    monkeypatch.setattr(cs, "FOMC_HIST_MOVE_PCT", 5.0)
+    fams, verdict = family_priority(_harvest_ctx())
+    assert not any(why.startswith("FOMC harvest") for _, why in fams)
+    assert verdict.startswith("STAND ASIDE")
+
+
+def test_event_harvest_blocked_deep_vrp():
+    from selection.ranker import family_priority
+    fams, verdict = family_priority(_harvest_ctx(vrp=-3.0))
+    assert not any(why.startswith("FOMC harvest") for _, why in fams)
+    assert verdict.startswith("STAND ASIDE")
+
+
+# ------------------------------------------------ Friday cadence gate -------
+
+def _condor_regime_ctx(day):
+    from core.context import build_context
+    from core.regime import build_gates
+    ctx = build_context("SPX", "mock", day)
+    ctx.regime.update(vrp=1.5, vol_state="NRM", trend="RNG", gamma="+g",
+                      iv_chg_pct=0.0)
+    ctx.regime["term"]["verdict"] = "FLAT"
+    ctx.gates = build_gates(ctx.regime, ctx.events, ctx.today)
+    return ctx
+
+
+def test_friday_gate_blocks_condor():
+    from selection.ranker import family_priority
+    ctx = _condor_regime_ctx(date(2026, 6, 26))          # a Friday
+    assert any(g["code"] == "W" for g in ctx.gates)
+    fams, verdict = family_priority(ctx)
+    assert all(k != "condor" for k, _ in fams)
+    assert "Friday" in verdict
+
+
+def test_monday_allows_condor():
+    from selection.ranker import family_priority
+    ctx = _condor_regime_ctx(date(2026, 6, 22))          # the Monday before
+    assert not any(g["code"] == "W" for g in ctx.gates)
+    fams, _ = family_priority(ctx)
+    assert any(k == "condor" for k, _ in fams)
+
+
+# ------------------------------------------------ campaign scope + stress ---
+
+def test_campaign_legs_excluded():
+    from datetime import timedelta
+    from core.context import build_context
+    from portfolio.book import book_greeks
+    ctx = build_context("SPX", "mock", TODAY)
+    near = (TODAY + timedelta(days=30)).strftime("%Y%m%d")
+    far = (TODAY + timedelta(days=160)).strftime("%Y%m%d")
+    pos = [{"cp": "P", "strike": 6000.0, "expiry": near, "qty": -1, "conId": 1},
+           {"cp": "P", "strike": 5800.0, "expiry": far, "qty": 2, "conId": 2}]
+    b = book_greeks(ctx, pos)
+    assert b["excluded_long_dte"] == 1
+    assert b["positions"] == 2
+    assert b["min_short_dte"] == 30
+    assert b["greeks"] == book_greeks(ctx, pos[:1])["greeks"]
+
+
+def test_stress_book_direction():
+    from datetime import timedelta
+    from core.context import build_context
+    from portfolio.book import stress_book
+    ctx = build_context("SPX", "mock", TODAY)
+    exp = (TODAY + timedelta(days=30)).strftime("%Y%m%d")
+    short_puts = [{"cp": "P", "strike": 6000.0, "expiry": exp, "qty": -2, "conId": 1}]
+    long_puts = [{"cp": "P", "strike": 6000.0, "expiry": exp, "qty": 2, "conId": 1}]
+    s_short = stress_book(ctx, short_puts)
+    assert s_short[0]["name"].startswith("-5%")
+    assert s_short[0]["pnl"] < 0
+    assert stress_book(ctx, long_puts)[0]["pnl"] > 0
