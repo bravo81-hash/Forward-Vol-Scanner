@@ -1,395 +1,142 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Forward Vol Scanner</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TE Playbook — Trade Selection</title>
 <style>
-  :root {
-    --bg:#11111b; --panel:#1e1e2e; --panel2:#181825; --line:#313244;
-    --fg:#cdd6f4; --dim:#7f849c; --accent:#89b4fa;
-    --green:#a6e3a1; --yellow:#f9e2af; --red:#f38ba8; --teal:#94e2d5;
-  }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg);
-         font:14px "Segoe UI", system-ui, sans-serif; }
-  header { display:flex; align-items:center; gap:14px; padding:12px 20px;
-           background:var(--panel2); border-bottom:1px solid var(--line);
-           position:sticky; top:0; z-index:5; flex-wrap:wrap; }
-  h1 { font-size:17px; margin:0; color:var(--accent); }
-  .pill { display:flex; align-items:center; gap:6px; background:var(--panel);
-          border:1px solid var(--line); border-radius:999px; padding:5px 12px;
-          font-size:12px; color:var(--dim); }
-  .dot { width:9px; height:9px; border-radius:50%; background:var(--red); }
-  .dot.ok { background:var(--green); }
-  .seg { display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
-  .seg button { background:var(--panel); color:var(--dim); border:0; padding:7px 16px;
-                cursor:pointer; font-weight:600; font-size:13px; }
-  .seg button.active { background:var(--accent); color:#11111b; }
-  .scanbtns { display:flex; gap:6px; margin-left:auto; }
-  .scanbtns button { background:#26324b; color:var(--fg); border:1px solid var(--line);
-                     border-radius:8px; padding:7px 14px; cursor:pointer; font-weight:600; }
-  .scanbtns button:hover { border-color:var(--accent); }
-  .scanbtns button:disabled { opacity:.4; cursor:wait; }
-  main { padding:18px 20px 60px; max-width:1240px; margin:0 auto; }
-  .surface { background:var(--panel); border:1px solid var(--line); border-radius:14px;
-             margin-bottom:22px; overflow:hidden; }
-  .surf-head { display:flex; align-items:baseline; gap:16px; padding:14px 18px 4px; flex-wrap:wrap; }
-  .surf-head h2 { margin:0; font-size:18px; }
-  .surf-head .meta { color:var(--dim); font-size:12.5px; }
-  .surf-body { display:grid; grid-template-columns: 300px 1fr; gap:14px; padding:10px 18px 18px; }
-  @media (max-width: 900px){ .surf-body { grid-template-columns:1fr; } }
-  .termbox { background:var(--panel2); border:1px solid var(--line); border-radius:10px;
-             padding:10px; height:210px; }
-  .pairs { display:flex; flex-direction:column; gap:8px; }
-  .pair { display:flex; align-items:center; gap:12px; background:var(--panel2);
-          border:1px solid var(--line); border-radius:10px; padding:10px 14px; flex-wrap:wrap; }
-  .pair .dates { min-width:200px; }
-  .pair .dates b { font-size:14px; }
-  .pair .dates span { color:var(--dim); font-size:12px; }
-  .nums { display:flex; gap:14px; font-size:12.5px; color:var(--dim); }
-  .nums b { color:var(--fg); font-size:13.5px; display:block; }
-  .badge { font-size:11.5px; font-weight:700; border-radius:6px; padding:4px 9px; }
-  .badge.cheap { background:#1c3a2a; color:var(--green); }
-  .badge.marginal { background:#3a341c; color:var(--yellow); }
-  .badge.none { background:#3a1c27; color:var(--red); }
-  .chips { display:flex; gap:6px; flex-wrap:wrap; flex:1; }
-  .chip { font-size:11px; background:#272736; color:var(--teal); border-radius:6px;
-          padding:3px 8px; }
-  .chip.warn { color:var(--yellow); }
-  .chip.clean { color:var(--dim); }
-  .pair .actions { margin-left:auto; display:flex; gap:6px; }
-  .pair .actions button { background:transparent; border:1px solid var(--line);
-        color:var(--accent); border-radius:8px; padding:6px 12px; cursor:pointer; font-weight:600; }
-  .pair .actions button:hover { border-color:var(--accent); }
-  .empty { color:var(--dim); padding:18px; }
-  /* modal */
-  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none;
-             align-items:center; justify-content:center; z-index:20; }
-  .overlay.show { display:flex; }
-  .modal { background:var(--panel); border:1px solid var(--line); border-radius:16px;
-           width:min(860px, 94vw); max-height:92vh; overflow:auto; padding:20px 22px; }
-  .modal h3 { margin:0 0 4px; font-size:16px; }
-  .modal .sub { color:var(--dim); font-size:12.5px; margin-bottom:14px; }
-  .metrics { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
-  .metric { background:var(--panel2); border:1px solid var(--line); border-radius:10px;
-            padding:8px 14px; }
-  .metric .k { font-size:11px; color:var(--dim); }
-  .metric .v { font-size:15px; font-weight:700; }
-  .riskchart { background:var(--panel2); border:1px solid var(--line); border-radius:10px;
-               padding:10px; height:300px; margin-bottom:12px; }
-  .assume { font-size:11.5px; color:var(--dim); margin-bottom:16px; }
-  .orderrow { display:flex; gap:10px; align-items:end; flex-wrap:wrap;
-              border-top:1px solid var(--line); padding-top:14px; }
-  .orderrow label { font-size:11px; color:var(--dim); display:block; margin-bottom:3px; }
-  .orderrow input { background:var(--panel2); border:1px solid var(--line); color:var(--fg);
-                    border-radius:8px; padding:8px 10px; width:90px; font-size:14px; }
-  .send { background:#2d6a4f; color:#fff; border:0; border-radius:8px; padding:10px 18px;
-          font-weight:700; cursor:pointer; }
-  .send:hover { filter:brightness(1.15); }
-  .send:disabled { opacity:.4; cursor:not-allowed; }
-  .closex { margin-left:auto; background:transparent; border:0; color:var(--dim);
-            font-size:20px; cursor:pointer; }
-  .ordernote { font-size:11.5px; color:var(--yellow); margin-top:8px; }
-  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
-           background:var(--panel2); border:1px solid var(--line); color:var(--fg);
-           border-radius:10px; padding:11px 18px; font-size:13px; display:none; z-index:30;
-           max-width:80vw; }
-</style>
-</head>
-<body>
-
+:root{--ink:#0E1116;--panel:#161B22;--p2:#1C232C;--line:#2A3340;--txt:#DCE3EA;
+--mut:#8A94A1;--jade:#3FB68B;--red:#D45D5D;--amber:#E8A33D;
+--mono:"SF Mono","Cascadia Code",Consolas,monospace;
+--disp:"Avenir Next Condensed","Arial Narrow",sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--txt);font:14px/1.5 -apple-system,"Segoe UI",Roboto,sans-serif;padding:20px}
+header{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-family:var(--disp);font-size:24px;letter-spacing:.05em;text-transform:uppercase}
+h1 b{color:var(--amber)}
+.tabs button,.modes button{background:var(--panel);border:1px solid var(--line);color:var(--txt);
+padding:6px 14px;font:inherit;cursor:pointer}
+.tabs button.on{border-color:var(--amber);color:var(--amber)}
+.modes button.on{border-color:var(--jade);color:var(--jade)}
+#scan{background:var(--amber);color:#000;border:none;padding:7px 18px;font-weight:600;cursor:pointer}
+#status{font-family:var(--mono);font-size:11px;color:var(--mut)}
+.verdict{font-family:var(--disp);font-size:19px;text-transform:uppercase;letter-spacing:.04em;
+padding:10px 14px;border-left:4px solid var(--mut);background:var(--panel);margin:14px 0}
+.verdict.go{border-color:var(--jade)} .verdict.warn{border-color:var(--amber)} .verdict.stop{border-color:var(--red)}
+.ctxrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.chip{background:var(--panel);border:1px solid var(--line);padding:5px 10px;font-family:var(--mono);font-size:11px}
+.chip b{color:var(--amber)}
+.warnbox{border:1px solid var(--red);background:rgba(212,93,93,.08);padding:8px 12px;font-size:13px;margin-bottom:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px}
+.card h3{font-family:var(--disp);font-size:16px;text-transform:uppercase;letter-spacing:.05em}
+.card .fam{font-family:var(--mono);font-size:10px;color:var(--amber);text-transform:uppercase;letter-spacing:.12em}
+.legs{font-family:var(--mono);font-size:12px;color:var(--txt);margin:7px 0;line-height:1.7}
+.nums{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:12px;margin:6px 0}
+.nums span b{display:block;font-size:10px;color:var(--mut);font-weight:400;text-transform:uppercase}
+.pos{color:var(--jade)}.neg{color:var(--red)}.amb{color:var(--amber)}
+.why{font-size:12px;color:var(--mut);margin:8px 0}
+.why li{margin-left:16px}
+.cbtns{display:flex;gap:8px;margin-top:8px}
+.cbtns button{background:var(--p2);border:1px solid var(--line);color:var(--txt);padding:5px 12px;font:inherit;font-size:12px;cursor:pointer}
+.cbtns button.stagebtn{border-color:var(--jade);color:var(--jade)}
+svg{width:100%;display:block;margin-top:8px;background:var(--ink);border:1px solid var(--line)}
+.bookbar{font-family:var(--mono);font-size:11px;color:var(--mut);margin:6px 0 14px}
+.toast{position:fixed;bottom:18px;right:18px;background:var(--p2);border:1px solid var(--jade);
+padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:420px}
+</style></head><body>
 <header>
-  <h1>⚡ Forward Vol Scanner</h1>
-  <div class="seg" id="modeSeg">
-    <button data-mode="mock" class="active">Mock</button>
-    <button data-mode="live">Live</button>
-  </div>
-  <div class="pill"><span class="dot" id="twsDot"></span><span id="twsLabel">TWS …</span></div>
-  <div class="scanbtns">
-    <button onclick="scan('SPX')">SPX</button>
-    <button onclick="scan('SPY')">SPY</button>
-    <button onclick="scan('QQQ')">QQQ</button>
-    <button onclick="scan('IWM')">IWM</button>
-    <button onclick="scan('RUT')">RUT</button>
-    <button onclick="scanAll()">Scan All</button>
-  </div>
+ <h1>TE <b>Playbook</b></h1>
+ <span class="tabs" id="tabs"></span>
+ <span class="modes" id="modes">
+   <button data-m="mock" class="on">mock</button><button data-m="live">live</button></span>
+ <button id="scan">Scan</button>
+ <span id="status">idle</span>
 </header>
-
-<main id="surfaces">
-  <div class="empty">Pick <b>Mock</b> (works premarket, synthetic data) or <b>Live</b>
-  (real quotes via TWS), then hit a scan button. Each suggested pair has a
-  <b>Risk</b> button for its P&amp;L profile and an order ticket that delivers to TWS
-  <i>untransmitted</i> for your review.</div>
-</main>
-
-<div class="overlay" id="overlay">
-  <div class="modal">
-    <div style="display:flex;align-items:start;">
-      <div>
-        <h3 id="mTitle"></h3>
-        <div class="sub" id="mSub"></div>
-      </div>
-      <button class="closex" onclick="closeModal()">✕</button>
-    </div>
-    <div class="metrics" id="mMetrics"></div>
-    <div class="riskchart"><canvas id="riskCanvas"></canvas></div>
-    <div class="assume" id="mAssume"></div>
-    <div class="orderrow">
-      <div><label>Qty</label><input id="oQty" type="number" min="1" max="10" value="1"></div>
-      <div><label id="oLimitLabel">Limit debit</label><input id="oLimit" type="number" step="0.05"></div>
-      <button class="send" id="oSend" onclick="sendOrder()">Send to TWS (held)</button>
-      <div class="ordernote">Arrives in TWS <b>untransmitted</b> — you review &amp; press
-        Transmit there. Nothing trades from this page.</div>
-    </div>
-  </div>
-</div>
-
-<div id="toast"></div>
-
+<div id="out"></div>
+<div class="toast" id="toast"></div>
 <script>
-let mode = 'mock';
-const charts = {};          // per-symbol term charts
-let riskChart = null;
-let current = null;         // pair shown in the modal
-
-document.querySelectorAll('#modeSeg button').forEach(b => {
-  b.onclick = () => {
-    mode = b.dataset.mode;
-    document.querySelectorAll('#modeSeg button').forEach(x => x.classList.toggle('active', x === b));
-    toast(`Mode: ${mode.toUpperCase()}`);
-  };
-});
-
-function toast(msg, ms = 3500) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.display = 'block';
-  clearTimeout(t._h);
-  t._h = setTimeout(() => t.style.display = 'none', ms);
+"use strict";
+const SYMS=["SPX","SPY","QQQ","RUT","IWM"];let SYM="SPX",MODE="mock",LAST=null;
+const $=id=>document.getElementById(id);
+$("tabs").innerHTML=SYMS.map(s=>`<button data-s="${s}" class="${s===SYM?'on':''}">${s}</button>`).join("");
+$("tabs").onclick=e=>{const b=e.target.closest("button");if(!b)return;SYM=b.dataset.s;
+ document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x.dataset.s===SYM));scan();};
+$("modes").onclick=e=>{const b=e.target.closest("button");if(!b)return;MODE=b.dataset.m;
+ document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",x.dataset.m===MODE));};
+$("scan").onclick=()=>scan();
+function toast(t){const e=$("toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",6000);}
+function fmt(x,d=2){return(x>=0?"+":"")+(+x).toFixed(d);}
+async function scan(){
+ $("status").textContent="scanning "+SYM+" ("+MODE+")…";
+ try{
+  const r=await fetch(`/api/suggest?symbol=${SYM}&mode=${MODE}`);const d=await r.json();
+  if(d.error)throw new Error(d.error);LAST=d;render(d);
+  $("status").textContent=`${SYM} spot ${d.spot} · ${MODE} · ${new Date().toLocaleTimeString()}`;
+ }catch(e){$("status").textContent="error";toast("Scan failed: "+e.message);}
 }
-
-async function pollStatus() {
-  try {
-    const r = await (await fetch('/api/status')).json();
-    document.getElementById('twsDot').className = 'dot' + (r.tws ? ' ok' : '');
-    document.getElementById('twsLabel').textContent =
-      r.tws ? `TWS ${r.host}:${r.port}` : 'TWS offline';
-  } catch { /* server down */ }
+function vclass(v){return v.startsWith("TRADE —")||v.startsWith("CAUTION")?"warn":v.startsWith("TRADE")?"go":v.startsWith("MARGINAL")?"warn":"stop";}
+function render(d){
+ const r=d.regime,t=r.term||{};
+ let h=`<div class="verdict ${vclass(d.verdict)}">${d.verdict}</div>`;
+ h+=`<div class="ctxrow">
+  <span class="chip">vol <b>${r.vol_state}</b> pctl ${r.iv_pctl}%</span>
+  <span class="chip">trend <b>${r.trend}</b> adx ${r.adx}</span>
+  <span class="chip">tape <b>${r.gamma}</b> (${r.gamma_score})</span>
+  <span class="chip">VRP <b>${fmt(r.vrp,1)}v</b> rv21 ${r.rv21}</span>
+  <span class="chip">curve <b>${t.verdict||"—"}</b> 9/30 ${t.rat_front||"—"}</span>
+  <span class="chip">bias <b>${fmt(r.bias,0)}</b></span>
+  <span class="chip">FOMC <b>d-${d.events.fomc_dte}</b>${d.events.opex_week?" · OpEx wk":""}${d.events.post_opex?" · post-OpEx":""}</span></div>`;
+ if(d.gates.length)h+=`<div class="warnbox">${d.gates.map(g=>(g.hard?"⛔ ":"⚠ ")+g.msg).join("<br>")}</div>`;
+ if(d.book&&d.book.greeks){const g=d.book.greeks;
+  h+=`<div class="bookbar">BOOK ${SYM}: ${d.book.positions} legs · Δ ${fmt(g.delta)} γ ${fmt(g.gamma,3)} θ ${fmt(g.theta)} ν ${fmt(g.vega)}`+
+   (d.book_warnings.length?` — <span class="neg">${d.book_warnings.join(" · ")}</span>`:"")+`</div>`;}
+ h+=`<div class="cards">`+d.cards.map((c,i)=>card(c,i)).join("")+`</div>`;
+ if(!d.cards.length)h+=`<p style="color:var(--mut)">No candidates — gates blocked all families. Manage existing only.</p>`;
+ $("out").innerHTML=h;
 }
-pollStatus(); setInterval(pollStatus, 15000);
-
-function setButtons(disabled) {
-  document.querySelectorAll('.scanbtns button').forEach(b => b.disabled = disabled);
+function card(c,i){
+ const cr=c.net_mid<0;
+ return `<div class="card">
+  <div class="fam">${c.strategy}</div><h3>${c.label}</h3>
+  <div class="legs">${c.legs.join("<br>")}</div>
+  <div class="nums">
+   <span><b>${cr?"credit":"debit"}</b><span class="amb">${Math.abs(c.net_mid).toFixed(2)}</span></span>
+   <span><b>max P</b><span class="pos">${fmt(c.max_profit,1)}</span></span>
+   <span><b>max L</b><span class="neg">${fmt(c.max_loss,1)}</span></span>
+   <span><b>BEs</b>${(c.breakevens||[]).join(" / ")||"—"}</span>
+   <span><b>θ/ν/Δ</b>${fmt(c.greeks.theta)} / ${fmt(c.greeks.vega)} / ${fmt(c.greeks.delta)}</span>
+   <span><b>score</b><span class="amb">${c.score}</span></span></div>
+  <ul class="why">${c.rationale.map(x=>`<li>${x}</li>`).join("")}</ul>
+  <div class="cbtns">
+   <button onclick="payoff(${i})">Risk graph</button>
+   <button class="stagebtn" onclick="stage(${i})">Stage to TWS</button></div>
+  <div id="g${i}"></div></div>`;
 }
-
-async function scanAll() {
-  for (const s of ['SPX', 'SPY', 'QQQ', 'IWM', 'RUT']) await scan(s);
+async function payoff(i){
+ const c=LAST.cards[i];
+ const r=await fetch("/api/payoff",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({spot:LAST.spot,legs:c.legs_raw})});
+ const d=await r.json();const W=420,H=170,pl=44,pb=18;
+ const ymax=Math.max(...d.expiry,...d.t5,1),ymin=Math.min(...d.expiry,...d.t5,-1);
+ const X=j=>pl+j/(d.x.length-1)*(W-pl-6),Y=p=>6+(ymax-p)/(ymax-ymin)*(H-pb-12);
+ const path=a=>a.map((p,j)=>(j?"L":"M")+X(j).toFixed(1)+","+Y(p).toFixed(1)).join(" ");
+ let seg="";for(let j=1;j<d.x.length;j++){const col=(d.expiry[j-1]+d.expiry[j])/2>=0?"var(--jade)":"var(--red)";
+  seg+=`<line x1="${X(j-1)}" y1="${Y(d.expiry[j-1])}" x2="${X(j)}" y2="${Y(d.expiry[j])}" stroke="${col}" stroke-width="2"/>`;}
+ $("g"+i).innerHTML=`<svg viewBox="0 0 ${W} ${H}">
+  <line x1="${pl}" y1="${Y(0)}" x2="${W-6}" y2="${Y(0)}" stroke="var(--line)"/>
+  ${seg}<path d="${path(d.t5)}" fill="none" stroke="var(--amber)" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="${pl}" y="${H-4}" fill="var(--mut)" font-size="9" font-family="var(--mono)">${d.x[0]}</text>
+  <text x="${W-6}" y="${H-4}" fill="var(--mut)" font-size="9" font-family="var(--mono)" text-anchor="end">${d.x[d.x.length-1]}</text>
+  <text x="${W-8}" y="14" fill="var(--jade)" font-size="9" font-family="var(--mono)" text-anchor="end">— front expiry</text>
+  <text x="${W-8}" y="26" fill="var(--amber)" font-size="9" font-family="var(--mono)" text-anchor="end">- - T+5</text></svg>`;
 }
-
-async function scan(symbol) {
-  setButtons(true);
-  toast(`Scanning ${symbol} (${mode})…`, 60000);
-  try {
-    const r = await fetch(`/api/scan?symbol=${symbol}&mode=${mode}`);
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || r.statusText);
-    render(d);
-    toast(`${symbol} scan done — ${d.pairs.length} pairs`);
-  } catch (e) {
-    toast(`${symbol}: ${e.message}`, 6000);
-  } finally {
-    setButtons(false);
-  }
+async function stage(i){
+ const c=LAST.cards[i];
+ if(!confirm(`Stage ${c.label} (${MODE})?\n${c.legs.join("\n")}\nnet ${c.net_mid}`))return;
+ const r=await fetch("/api/stage",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({symbol:SYM,mode:MODE,legs:c.legs_raw,net_mid:c.net_mid,qty:1})});
+ const d=await r.json();
+ if(d.error)return toast("Stage failed: "+d.error);
+ toast(`${d.status} · order ${d.orderId}`+(d.margin_change!=null?` · margin Δ $${(+d.margin_change).toFixed(0)}`:"")+(d.note?" · "+d.note:""));
 }
-
-function tagClass(tag) {
-  return tag === 'CHEAP FWD' ? 'cheap' : tag === 'MARGINAL' ? 'marginal' : 'none';
-}
-
-function eventChips(ev) {
-  if (ev === 'clean') return '<span class="chip clean">no events in window</span>';
-  return ev.split('; ').map(e =>
-    `<span class="chip ${e.includes('BACK ONLY') ? 'warn' : ''}">${e}</span>`).join('');
-}
-
-function render(d) {
-  const id = `surf-${d.symbol}`;
-  let el = document.getElementById(id);
-  if (!el) {
-    el = document.createElement('div');
-    el.id = id;
-    el.className = 'surface';
-    const main = document.getElementById('surfaces');
-    const ph = main.querySelector('.empty');
-    if (ph) ph.remove();
-    main.appendChild(el);
-  }
-  const pairsHtml = d.pairs.length ? d.pairs.map((p, i) => `
-    <div class="pair">
-      <div class="dates"><b>${p.front} → ${p.back}</b><br>
-        <span>${p.fdte}d / ${p.bdte}d &nbsp;·&nbsp; gap ${p.bdte - p.fdte}d</span></div>
-      <div class="nums">
-        <div>front IV<b>${p.fiv}%</b></div>
-        <div>back IV<b>${p.biv}%</b></div>
-        <div>fwd vol<b>${p.fwd ?? '—'}%</b></div>
-        <div>edge<b>${p.edge > 0 ? '+' : ''}${p.edge ?? '—'}</b></div>
-      </div>
-      <span class="badge ${tagClass(p.tag)}">${p.tag}</span>
-      <div class="chips">${eventChips(p.events)}</div>
-      <div class="actions">
-        <button onclick='openRisk(${JSON.stringify(d.symbol)}, ${JSON.stringify(p)})'>Risk ▸</button>
-      </div>
-    </div>`).join('')
-    : '<div class="empty">No pairs inside the DTE bands (front 12–21d, back 26–45d).</div>';
-
-  el.innerHTML = `
-    <div class="surf-head">
-      <h2>${d.symbol}</h2>
-      <span class="meta">spot <b>${d.spot.toLocaleString()}</b></span>
-      <span class="meta">ATM ${d.atm.toLocaleString()}</span>
-      <span class="meta">${d.term.length} expiries · ${d.mode.toUpperCase()} · ${d.ts}</span>
-    </div>
-    <div class="surf-body">
-      <div class="termbox"><canvas id="term-${d.symbol}"></canvas></div>
-      <div class="pairs">${pairsHtml}</div>
-    </div>`;
-
-  if (charts[d.symbol]) charts[d.symbol].destroy();
-  charts[d.symbol] = new Chart(document.getElementById(`term-${d.symbol}`), {
-    type: 'line',
-    data: {
-      labels: d.term.map(t => t.dte + 'd'),
-      datasets: [{
-        label: 'ATM IV %', data: d.term.map(t => t.iv),
-        borderColor: '#89b4fa', backgroundColor: 'rgba(137,180,250,.12)',
-        fill: true, tension: .3, pointRadius: 3,
-      }]
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false },
-                 title: { display: true, text: 'Term structure (ATM IV by DTE)',
-                          color: '#7f849c', font: { size: 11 } } },
-      scales: {
-        x: { ticks: { color: '#7f849c' }, grid: { color: '#26263a' } },
-        y: { ticks: { color: '#7f849c', callback: v => v + '%' }, grid: { color: '#26263a' } },
-      }
-    }
-  });
-}
-
-async function openRisk(symbol, p) {
-  toast('Building risk profile…', 20000);
-  try {
-    const r = await fetch(`/api/risk?symbol=${symbol}&mode=${mode}&front=${p.front}&back=${p.back}`);
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || r.statusText);
-    current = { symbol, ...d };
-    showRisk(d, p);
-    toast('Risk profile ready');
-  } catch (e) {
-    toast(`Risk: ${e.message}`, 6000);
-  }
-}
-
-function fmt$(v) { return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString(); }
-
-function showRisk(d, p) {
-  document.getElementById('mTitle').textContent =
-    `${d.symbol} ${d.strike.toLocaleString()} call calendar — sell ${d.front}, buy ${d.back}`;
-  document.getElementById('mSub').textContent =
-    `front IV ${d.fiv}% · back IV ${d.biv}% · fwd vol ${d.fwd}% · edge ${p.edge > 0 ? '+' : ''}${p.edge} pts · ${p.events}`;
-  const ba = leg => leg && leg.bid && leg.ask ? `${leg.bid} × ${leg.ask}` : '—';
-  const m = [
-    ['Debit (model)', `${d.debit} (${fmt$(d.debitDollars)})`],
-    ['Mid debit (live)', d.midDebit != null ? `${d.midDebit} (${fmt$(d.midDebit * 100)})` : '—'],
-    ['Max profit', fmt$(d.maxProfit)],
-    ['Max loss', fmt$(d.maxLoss)],
-    ['Reward / risk', d.rr ?? '—'],
-    ['Breakevens', d.breakevens.length ? d.breakevens.map(b => b.toLocaleString()).join(' / ') : '—'],
-    ['Delta', d.greeks.delta],
-    ['Gamma', d.greeks.gamma],
-    ['Theta / day', fmt$(d.greeks.theta)],
-    ['Vega / vol pt', fmt$(d.greeks.vega)],
-    ['Front bid × ask', ba(d.legs && d.legs.front)],
-    ['Back bid × ask', ba(d.legs && d.legs.back)],
-  ];
-  document.getElementById('mMetrics').innerHTML = m.map(([k, v]) =>
-    `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
-  document.getElementById('mAssume').textContent = d.assumptions +
-    ' Greeks are net per spread (back minus front), Black-Scholes at current spot.';
-  document.getElementById('oLimit').value = d.limitSuggest.toFixed(2);
-  document.getElementById('oLimitLabel').textContent =
-    d.limitSrc === 'mid' ? 'Limit (live mid)' : 'Limit (model est.)';
-  document.getElementById('oQty').value = 1;
-  document.getElementById('oSend').disabled = (mode !== 'live');
-  document.getElementById('oSend').title =
-    mode === 'live' ? '' : 'Switch to Live mode to send orders';
-
-  if (riskChart) riskChart.destroy();
-  riskChart = new Chart(document.getElementById('riskCanvas'), {
-    type: 'line',
-    data: {
-      labels: d.points.map(pt => pt.s),
-      datasets: [{
-        label: 'P&L at front expiry ($/spread)',
-        data: d.points.map(pt => pt.pnl),
-        pointRadius: 0, borderWidth: 2, fill: { target: { value: 0 } },
-        segment: { borderColor: c => c.p1.parsed.y >= 0 ? '#a6e3a1' : '#f38ba8' },
-        backgroundColor: 'rgba(166,227,161,.08)',
-      }]
-    },
-    options: {
-      maintainAspectRatio: false, interaction: { intersect: false, mode: 'index' },
-      plugins: { legend: { labels: { color: '#7f849c' } } },
-      scales: {
-        x: { title: { display: true, text: `${d.symbol} price at front expiry`, color: '#7f849c' },
-             ticks: { color: '#7f849c', maxTicksLimit: 13 }, grid: { color: '#26263a' } },
-        y: { ticks: { color: '#7f849c', callback: v => '$' + v.toLocaleString() },
-             grid: { color: '#26263a' } },
-      }
-    }
-  });
-  document.getElementById('overlay').classList.add('show');
-}
-
-function closeModal() { document.getElementById('overlay').classList.remove('show'); }
-document.getElementById('overlay').addEventListener('click', e => {
-  if (e.target.id === 'overlay') closeModal();
-});
-
-async function sendOrder() {
-  if (!current) return;
-  const qty = parseInt(document.getElementById('oQty').value, 10);
-  const limit = parseFloat(document.getElementById('oLimit').value);
-  const msg = `Send to TWS as HELD (untransmitted):\n\n` +
-    `${current.symbol} call calendar ${current.strike}\n` +
-    `SELL ${qty}x ${current.front}  /  BUY ${qty}x ${current.back}\n` +
-    `Limit debit: ${limit}  (~${fmt$(limit * 100 * qty)})\n\n` +
-    `You must still review & transmit inside TWS. Continue?`;
-  if (!confirm(msg)) return;
-  const btn = document.getElementById('oSend');
-  btn.disabled = true;
-  try {
-    const r = await fetch('/api/order', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        symbol: current.symbol, mode,
-        front: current.front, back: current.back,
-        strike: current.strike, qty, limit,
-      })
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || r.statusText);
-    toast(`Order #${d.orderId} delivered to TWS (${d.status}). ${d.note}`, 9000);
-  } catch (e) {
-    toast(`Order failed: ${e.message}`, 8000);
-  } finally {
-    btn.disabled = (mode !== 'live');
-  }
-}
-</script>
-</body>
-</html>
+scan();
+</script></body></html>
