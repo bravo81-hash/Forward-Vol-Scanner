@@ -50,15 +50,20 @@ def test_shortlist_all_symbols():
             assert c["max_loss"] <= 0 and c["legs_raw"]
 
 
-def test_hard_gate_blocks():
+def test_hard_gate_warns_not_blocks():
+    """A hard gate (IV spike) is now the strongest WARNING, not a block:
+    suggestions still come back and the verdict carries the warning."""
     from core.context import build_context
     from selection.ranker import family_priority
     ctx = build_context("SPX", "mock", TODAY)
     ctx.regime["iv_chg_pct"] = 20.0
     from core.regime import build_gates
     ctx.gates = build_gates(ctx.regime, ctx.events)
+    assert any(g["hard"] for g in ctx.gates)
     fams, verdict = family_priority(ctx)
-    assert fams == [] and verdict.startswith("STAND ASIDE")
+    assert fams                                   # cards still shown
+    assert verdict.startswith("WARNING")
+    assert "unsettled" in verdict                 # the IV-spike reason surfaces
 
 
 def test_front_exit_rule():
@@ -168,20 +173,24 @@ def test_event_harvest_fires():
         assert any("DO NOT apply" in r for r in c["rationale"])
 
 
-def test_event_harvest_blocked_when_thin(monkeypatch):
+def test_event_harvest_not_offered_when_thin(monkeypatch):
+    """Thin event premium: no EVENT CAL family is offered, but the app still
+    shows best-available suggestions rather than standing aside."""
     import core.surface as cs
     from selection.ranker import family_priority
     monkeypatch.setattr(cs, "FOMC_HIST_MOVE_PCT", 5.0)
     fams, verdict = family_priority(_harvest_ctx())
     assert not any(why.startswith("FOMC harvest") for _, why in fams)
-    assert verdict.startswith("STAND ASIDE")
+    assert fams                                   # suggestions still shown
+    assert not verdict.startswith("TRADE")        # but flagged cautionary
 
 
-def test_event_harvest_blocked_deep_vrp():
+def test_event_harvest_not_offered_deep_vrp():
     from selection.ranker import family_priority
     fams, verdict = family_priority(_harvest_ctx(vrp=-3.0))
     assert not any(why.startswith("FOMC harvest") for _, why in fams)
-    assert verdict.startswith("STAND ASIDE")
+    assert fams
+    assert not verdict.startswith("TRADE")
 
 
 # ------------------------------------------------ Friday cadence gate -------
@@ -197,13 +206,15 @@ def _condor_regime_ctx(day):
     return ctx
 
 
-def test_friday_gate_blocks_condor():
+def test_friday_warns_not_blocks_condor():
+    """Friday no longer removes credit families — the W gate warns and the
+    debit structures merely rank first; condor is still offered."""
     from selection.ranker import family_priority
     ctx = _condor_regime_ctx(date(2026, 6, 26))          # a Friday
-    assert any(g["code"] == "W" for g in ctx.gates)
-    fams, verdict = family_priority(ctx)
-    assert all(k != "condor" for k, _ in fams)
-    assert "Friday" in verdict
+    assert any(g["code"] == "W" for g in ctx.gates)      # Friday warning present
+    fams, _ = family_priority(ctx)
+    assert fams                                          # suggestions still shown
+    assert any(k == "condor" for k, _ in fams)           # condor not removed
 
 
 def test_monday_allows_condor():

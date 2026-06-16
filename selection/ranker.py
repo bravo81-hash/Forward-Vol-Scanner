@@ -2,6 +2,12 @@
 
 Mirrors TE Console v2.2 priority order exactly (one source of truth):
 gates -> family priority list -> per-family candidates -> composite score.
+
+Doctrine is ADVISORY, not a kill-switch: the rules decide which families
+rank best and raise gate warnings, but they never suppress output. Even a
+stressed surface, negative VRP, or a Friday session still returns the
+best-available candidates — the warnings (gates + verdict) tell the user
+to stand aside; they don't make that decision for them.
 """
 from __future__ import annotations
 
@@ -14,16 +20,19 @@ FRIDAY_OK = {"calendar", "double_calendar", "diagonal"}   # net-debit long-vega
 
 
 def family_priority(ctx: Context) -> tuple[list[tuple[str, str]], str]:
-    """Returns ([(family_key, reason)...] best-first, verdict)."""
+    """Returns ([(family_key, reason)...] best-first, verdict).
+
+    Never returns an empty list on account of a gate — suggestions are
+    always shown and the doctrine speaks through warnings instead.
+    """
     r, ev = ctx.regime, ctx.events
     hard = [g for g in ctx.gates if g["hard"]]
-    if hard:
-        return [], "STAND ASIDE — " + "; ".join(g["msg"] for g in hard)
 
     fams: list[tuple[str, str]] = []
     neg_g = r["gamma"] == "-g"
     vrp_ok = r["vrp"] > 0
     term = r.get("term", {}).get("verdict", "FLAT")
+    verdict = None
 
     if neg_g:
         fams.append(("bwb", "-g tape: defined-risk skew-financed only, HALF SIZE"))
@@ -40,44 +49,48 @@ def family_priority(ctx: Context) -> tuple[list[tuple[str, str]], str]:
                              f"FOMC harvest: implied event move "
                              f"{evp['implied_move_pct']:.2f}% >= 1.25x hist "
                              f"0.9% — sell the kinked front"))
-                return fams[:2], "TRADE — CAUTION (event harvest, half size)"
-        if term in ("STEEP CONTANGO", "CONTANGO"):
-            fams.append(("calendar", "VRP negative — debit time spread is the only allowed family"))
-        verdict = "CAUTION — VRP negative, premium selling unpaid"
-        return fams[:2], verdict if fams else "STAND ASIDE — VRP negative, no debit edge either"
-
-    if ev["opex_week"] and r["trend"] == "RNG" and r["gamma"] == "+g":
-        fams.append(("butterfly", "OpEx pin window (+g, range)"))
-    if r["vol_state"] == "ELV":
-        fams.append(("bwb", "Elevated IV — skew finances wings, vol crush pays"))
-        fams.append(("condor", "Elevated IV alternative if rangebound"))
-    if r["vol_state"] == "NRM" and r["trend"] == "RNG":
-        fams.append(("condor", f"Normal vol, range, VRP {r['vrp']:+.1f}v"))
-        fams.append(("butterfly", "OTM fly if Direction leans down"))
-    if r["vol_state"] == "CMP" and r["trend"] == "RNG":
-        fams.append(("calendar", "Calm + range: cheap back vega, theta differential"))
-        fams.append(("double_calendar", "Wider tent variant"))
-    if r["vol_state"] == "CMP" and r["trend"] in ("UP", "DN"):
-        fams.append(("diagonal", f"Calm + {r['trend']} trend"))
-        fams.append(("calendar", "No-direction fallback"))
-    if term == "INVERTED FRONT":
-        fams.append(("calendar", "Front inverted — sell the rich front leg"))
+                verdict = "TRADE — CAUTION (event harvest, half size)"
+        if verdict is None:
+            if term in ("STEEP CONTANGO", "CONTANGO"):
+                fams.append(("calendar", "VRP negative — debit time spread preferred"))
+            verdict = "CAUTION — VRP negative, premium selling unpaid"
+    else:
+        if ev["opex_week"] and r["trend"] == "RNG" and r["gamma"] == "+g":
+            fams.append(("butterfly", "OpEx pin window (+g, range)"))
+        if r["vol_state"] == "ELV":
+            fams.append(("bwb", "Elevated IV — skew finances wings, vol crush pays"))
+            fams.append(("condor", "Elevated IV alternative if rangebound"))
+        if r["vol_state"] == "NRM" and r["trend"] == "RNG":
+            fams.append(("condor", f"Normal vol, range, VRP {r['vrp']:+.1f}v"))
+            fams.append(("butterfly", "OTM fly if Direction leans down"))
+        if r["vol_state"] == "CMP" and r["trend"] == "RNG":
+            fams.append(("calendar", "Calm + range: cheap back vega, theta differential"))
+            fams.append(("double_calendar", "Wider tent variant"))
+        if r["vol_state"] == "CMP" and r["trend"] in ("UP", "DN"):
+            fams.append(("diagonal", f"Calm + {r['trend']} trend"))
+            fams.append(("calendar", "No-direction fallback"))
+        if term == "INVERTED FRONT":
+            fams.append(("calendar", "Front inverted — sell the rich front leg"))
+        verdict = ("TRADE — CAUTION (half size)" if neg_g or r["vol_state"] == "ELV"
+                   or any(g["code"] == "F" for g in ctx.gates) else "TRADE")
 
     seen, ordered = set(), []
     for k, why in fams:
         if k not in seen:
             ordered.append((k, why))
             seen.add(k)
-    verdict = ("TRADE — CAUTION (half size)" if neg_g or r["vol_state"] == "ELV"
-               or any(g["code"] == "F" for g in ctx.gates) else "TRADE")
-    if not ordered:
-        verdict = "MARGINAL — skipping is fine"
+    if not ordered:                      # no doctrine edge — show best-available
+        verdict = "MARGINAL — no clear edge, skipping is fine"
         ordered = [("condor", "No clear edge; condor only if credit/width clears 1/3"),
                    ("calendar", "Best available pair, thin edge")]
-    if any(g["code"] == "W" for g in ctx.gates):    # Friday: debit-only entry
-        ordered = [(k, w) for k, w in ordered if k in FRIDAY_OK]
-        if not ordered:
-            return [], "STAND ASIDE — Friday: no debit-structure edge today"
+    if any(g["code"] == "W" for g in ctx.gates):    # Friday: prefer net-debit
+        # doctrine prefers long-vega debit on Fridays — rank those first as a
+        # nudge, but DO NOT remove the others; the W gate carries the warning.
+        ordered.sort(key=lambda kw: kw[0] not in FRIDAY_OK)
+    if hard:                             # surface unsettled / stressed / unstable
+        # hard gates are the strongest warning, not a block: cards still show.
+        verdict = ("WARNING — " + "; ".join(g["msg"] for g in hard)
+                   + " — suggestions shown; confirm and size down")
     return ordered[:2], verdict
 
 

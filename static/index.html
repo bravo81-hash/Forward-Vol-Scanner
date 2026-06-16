@@ -93,7 +93,7 @@ function render(d){
   <span class="chip">bias <b>${fmt(r.bias,0)}</b></span>
   <span class="chip">FOMC <b>d-${d.events.fomc_dte}</b>${d.events.opex_week?" · OpEx wk":""}${d.events.post_opex?" · post-OpEx":""}</span>${
   d.walls?`<span class="chip">OI ${d.walls.expiry.slice(5)}: put wall <b>${d.walls.put_wall.strike}</b> · call wall <b>${d.walls.call_wall.strike}</b> · pin <b>${d.walls.pin.strike}</b> · GEX <b>${d.walls.gex_sign}</b></span>`:""}</div>`;
- if(d.gates.length)h+=`<div class="warnbox">${d.gates.map(g=>(g.hard?"⛔ ":"⚠ ")+g.msg).join("<br>")}</div>`;
+ if(d.gates.length)h+=`<div class="warnbox">${d.gates.map(g=>g.hard?`⚠ <b>${g.msg}</b>`:`⚠ ${g.msg}`).join("<br>")}</div>`;
  if(d.book&&d.book.greeks){const g=d.book.greeks;
   h+=`<div class="bookbar">BOOK ${SYM}: ${d.book.positions} legs · Δ ${fmt(g.delta)} γ ${fmt(g.gamma,3)} θ ${fmt(g.theta)} ν ${fmt(g.vega)}`+
    (d.book.excluded_long_dte?` (+${d.book.excluded_long_dte} long-DTE campaign legs excluded)`:"")+
@@ -102,7 +102,7 @@ function render(d){
    h+=`<div class="bookbar">STRESS: ${d.book.stress.map(s=>
     `${s.name} <span class="${s.pnl<0?'neg':'pos'}">${s.pnl<0?'-':'+'}$${Math.abs(s.pnl).toLocaleString()}</span>`).join(" · ")}</div>`;}
  h+=`<div class="cards">`+d.cards.map((c,i)=>card(c,i)).join("")+`</div>`;
- if(!d.cards.length)h+=`<p style="color:var(--mut)">No candidates — gates blocked all families. Manage existing only.</p>`;
+ if(!d.cards.length)h+=`<p style="color:var(--mut)">No structures cleared the strategy filters for this surface — manage existing only. (See warnings above.)</p>`;
  $("out").innerHTML=h;
 }
 function card(c,i){
