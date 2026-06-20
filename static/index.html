@@ -17,6 +17,7 @@ padding:6px 14px;font:inherit;cursor:pointer}
 .tabs button.on{border-color:var(--amber);color:var(--amber)}
 .modes button.on{border-color:var(--jade);color:var(--jade)}
 #scan{background:var(--amber);color:#000;border:none;padding:7px 18px;font-weight:600;cursor:pointer}
+#sentinel{background:var(--jade);color:#000;border:none;padding:7px 18px;font-weight:600;cursor:pointer}
 #status{font-family:var(--mono);font-size:11px;color:var(--mut)}
 .verdict{font-family:var(--disp);font-size:19px;text-transform:uppercase;letter-spacing:.04em;
 padding:10px 14px;border-left:4px solid var(--mut);background:var(--panel);margin:14px 0}
@@ -50,13 +51,14 @@ padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:
    <button data-m="mock" class="on">mock</button><button data-m="live">live</button></span>
  <select id="acct" style="background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:6px"></select>
  <button id="scan">Scan</button>
+ <button id="sentinel" title="Portfolio adjustment advisor — per-account guidance">Sentinel</button>
  <span id="status">idle</span>
 </header>
 <div id="out"></div>
 <div class="toast" id="toast"></div>
 <script>
 "use strict";
-const SYMS=["SPX","SPY","QQQ","RUT","IWM"];let SYM="SPX",MODE="mock",LAST=null,ACCTS=[];
+const SYMS=["SPX","SPY","QQQ","RUT","IWM"];let SYM="SPX",MODE="mock",LAST=null,ACCTS=[],VIEW="scan";
 async function loadAccts(){
  try{const r=await fetch(`/api/accounts?mode=${MODE}`);ACCTS=await r.json();
   if(ACCTS.error)throw 0;}catch(e){ACCTS=[];}
@@ -66,10 +68,12 @@ function acct(){const o=$("acct").selectedOptions[0];return o?{account:o.value,n
 const $=id=>document.getElementById(id);
 $("tabs").innerHTML=SYMS.map(s=>`<button data-s="${s}" class="${s===SYM?'on':''}">${s}</button>`).join("");
 $("tabs").onclick=e=>{const b=e.target.closest("button");if(!b)return;SYM=b.dataset.s;
- document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x.dataset.s===SYM));scan();};
+ document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x.dataset.s===SYM));refresh();};
 $("modes").onclick=e=>{const b=e.target.closest("button");if(!b)return;MODE=b.dataset.m;
  document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",x.dataset.m===MODE));loadAccts();};
-$("scan").onclick=()=>scan();
+$("scan").onclick=()=>{VIEW="scan";scan();};
+$("sentinel").onclick=()=>{VIEW="sentinel";sentinel();};
+function refresh(){return VIEW==="sentinel"?sentinel():scan();}
 function toast(t){const e=$("toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",6000);}
 function fmt(x,d=2){return(x>=0?"+":"")+(+x).toFixed(d);}
 async function scan(){
@@ -79,6 +83,45 @@ async function scan(){
   if(d.error)throw new Error(d.error);LAST=d;render(d);
   $("status").textContent=`${SYM} spot ${d.spot} · ${MODE} · ${new Date().toLocaleTimeString()}`;
  }catch(e){$("status").textContent="error";toast("Scan failed: "+e.message);}
+}
+async function sentinel(){
+ $("status").textContent="sentinel "+SYM+" ("+MODE+")…";
+ try{
+  const r=await fetch(`/api/sentinel?symbol=${SYM}&mode=${MODE}`);const d=await r.json();
+  if(d.error)throw new Error(d.error);renderSentinel(d);
+  $("status").textContent=`sentinel ${SYM} · ${MODE} · ${new Date().toLocaleTimeString()}`;
+ }catch(e){$("status").textContent="error";toast("Sentinel failed: "+e.message);}
+}
+function renderSentinel(d){
+ const nAct=d.cards.reduce((n,c)=>n+c.conflicts.filter(x=>x.severity==="act").length,0);
+ let h=`<div class="verdict ${nAct?'warn':'go'}">SENTINEL — ${d.headline}</div>`;
+ h+=`<div class="cards">`+d.cards.map(sentinelCard).join("")+`</div>`;
+ if(!d.cards.length)h+=`<p style="color:var(--mut)">No accounts found for ${MODE} mode.</p>`;
+ $("out").innerHTML=h;
+}
+function sentinelCard(c){
+ const g=c.greeks,b=c.budget;
+ let h=`<div class="card"><div class="fam">${c.pool}</div><h3>${c.label}</h3>
+  <div class="nums">
+   <span><b>Δ delta</b>${fmt(g.delta)}</span>
+   <span><b>γ gamma</b>${fmt(g.gamma,3)}</span>
+   <span><b>ν vega</b>${fmt(g.vega)}</span>
+   <span><b>θ theta</b>${fmt(g.theta)}</span>
+   <span><b>budget</b>±Δ${(+b.delta).toFixed(2)} ±ν${Math.round(b.vega)}</span></div>`;
+ if(c.aligned){
+  h+=`<div class="bookbar"><span class="pos">✓ aligned with regime — no adjustment forced</span></div>`;
+  h+=`<div class="legs">standing structures for this regime:</div>`;
+  h+=`<ul class="why">`+c.standing_plays.map(p=>
+   `<li><b>${p.family}</b> [${p.side}] — ${p.intent}</li>`).join("")+`</ul>`;
+ }else{
+  h+=`<div class="warnbox">`+c.conflicts.map(cf=>
+   (cf.severity==="act"?`⚠ <b>ACT — ${cf.name}</b>: `:`⚠ ${cf.name}: `)+cf.message).join("<br>")+`</div>`;
+  h+=`<div class="legs">suggested adjustments (regime-fit + Greek-fix):</div>`;
+  h+=`<ul class="why">`+c.suggestions.map(s=>
+   `<li><b>${s.family}</b> [${s.side}] · fix ${fmt(s.fix_score,0)} — ${s.intent}`+
+   (s.blocked?` <span class="neg">⛔ ${s.block_reason}</span>`:"")+`</li>`).join("")+`</ul>`;
+ }
+ return h+`</div>`;
 }
 function vclass(v){return v.startsWith("TRADE —")||v.startsWith("CAUTION")?"warn":v.startsWith("TRADE")?"go":v.startsWith("MARGINAL")?"warn":"stop";}
 function render(d){
