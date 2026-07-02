@@ -21,7 +21,7 @@ from core.context import build_context
 from core.events import trading_today
 from core.ib_client import DEFAULT_HOST, DEFAULT_PORT, with_ib
 from core.models import Leg
-from core.pricing import struct_value
+from core.pricing import struct_value, q_for
 from core.reprice import reprice_cards
 from core.surface import term_stats
 from core.walls import scan_walls
@@ -180,18 +180,19 @@ def api_sentinel():
 def api_payoff():
     d = request.get_json(force=True)
     spot, today = float(d["spot"]), trading_today()
+    q = q_for(d.get("symbol", ""))
     legs = [Leg(cp=l["cp"], strike=float(l["strike"]),
                 expiry=date.fromisoformat(l["expiry"]), qty=int(l["qty"]),
                 iv=float(l.get("iv") or 0.18)) for l in d["legs"]]
     entry = (float(d["net_mid"]) if d.get("net_mid") is not None
-             else struct_value(spot, legs, today))
+             else struct_value(spot, legs, today, q=q))
     front = min((l.expiry - today).days for l in legs)
     xs, exp, now = [], [], []
     s = spot * 0.90
     while s <= spot * 1.10:
         xs.append(round(s, 1))
-        exp.append(round(struct_value(s, legs, today, elapsed=front) - entry, 2))
-        now.append(round(struct_value(s, legs, today, elapsed=min(5, front)) - entry, 2))
+        exp.append(round(struct_value(s, legs, today, elapsed=front, q=q) - entry, 2))
+        now.append(round(struct_value(s, legs, today, elapsed=min(5, front), q=q) - entry, 2))
         s += spot * 0.004
     return jsonify({"x": xs, "expiry": exp, "t5": now, "front_dte": front})
 

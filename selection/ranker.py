@@ -80,9 +80,12 @@ def family_priority(ctx: Context) -> tuple[list[tuple[str, str]], str]:
             ordered.append((k, why))
             seen.add(k)
     if not ordered:                      # no doctrine edge — show best-available
-        verdict = "MARGINAL — no clear edge, skipping is fine"
+        if verdict is None:              # don't downgrade an existing CAUTION
+            verdict = "MARGINAL — no clear edge, skipping is fine"
         ordered = [("condor", "No clear edge; condor only if credit/width clears 1/3"),
                    ("calendar", "Best available pair, thin edge")]
+        if r["vrp"] <= 0:                # selling is unpaid — lead with the debit spread
+            ordered.reverse()
     if any(g["code"] == "W" for g in ctx.gates):    # Friday: prefer net-debit
         # doctrine prefers long-vega debit on Fridays — rank those first as a
         # nudge, but DO NOT remove the others; the W gate carries the warning.

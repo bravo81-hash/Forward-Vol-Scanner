@@ -43,7 +43,7 @@ def book_greeks(ctx: Context, positions: list[dict]) -> dict:
     all_legs = _position_legs(ctx, positions)
     legs = [l for l in all_legs
             if (l.expiry - ctx.today).days <= CAMPAIGN_MAX_DTE]
-    g = struct_greeks(ctx.spot, legs, ctx.today) if legs else \
+    g = struct_greeks(ctx.spot, legs, ctx.today, q=ctx.q) if legs else \
         {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
     fronts = [max(0, (l.expiry - ctx.today).days) for l in legs if l.qty < 0]
     return {"positions": len(positions), "greeks": g,
@@ -59,11 +59,11 @@ def stress_book(ctx: Context, positions: list[dict],
     legs = _position_legs(ctx, positions)
     if not legs:
         return []
-    base = struct_value(ctx.spot, legs, ctx.today)
+    base = struct_value(ctx.spot, legs, ctx.today, q=ctx.q)
     out = []
     for name, ds, div, days in scenarios:
         shocked = [Leg(cp=l.cp, strike=l.strike, expiry=l.expiry,
                        qty=l.qty, iv=max(l.iv + div, 0.01)) for l in legs]
-        v = struct_value(ctx.spot * (1 + ds), shocked, ctx.today, elapsed=days)
+        v = struct_value(ctx.spot * (1 + ds), shocked, ctx.today, elapsed=days, q=ctx.q)
         out.append({"name": name, "pnl": round((v - base) * 100, 0)})
     return out

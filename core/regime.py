@@ -28,6 +28,25 @@ def _stdev(xs):
     return math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1))
 
 
+def _tr(h: float, l: float, prev_close: float) -> float:
+    """Wilder true range — all three terms. The |low − prevClose| term was
+    missing, understating TR by ~25% on a −3% gap day (135 vs 180 measured)."""
+    return max(h - l, abs(h - prev_close), abs(l - prev_close))
+
+
+def _atr(highs, lows, closes, n=14):
+    """Wilder RMA of true range — matches Pine ta.atr exactly (P2). A plain
+    n-bar mean of TR (the prior form) diverges from ta.atr's smoothing, which
+    could flip `bias` near the ±0.5 ATR boundary vs the TV console."""
+    trs = [_tr(highs[i], lows[i], closes[i - 1]) for i in range(1, len(closes))]
+    if len(trs) < n:
+        return sum(trs) / len(trs) if trs else 0.0
+    atr = sum(trs[:n]) / n              # Wilder seed = simple mean of first n
+    for tr in trs[n:]:
+        atr = (atr * (n - 1) + tr) / n  # RMA recursion
+    return atr
+
+
 def _rv(closes, n):
     rs = [math.log(closes[i] / closes[i - 1]) for i in range(len(closes) - n, len(closes))]
     return _stdev(rs) * math.sqrt(252) * 100
@@ -36,8 +55,7 @@ def _rv(closes, n):
 def _adx(highs, lows, closes, n=14):
     trs, pdms, ndms = [], [], []
     for i in range(1, len(closes)):
-        trs.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]),
-                       abs(lows[i] - closes[i - 1])))
+        trs.append(_tr(highs[i], lows[i], closes[i - 1]))
         up, dn = highs[i] - highs[i - 1], lows[i - 1] - lows[i]
         pdms.append(up if up > dn and up > 0 else 0.0)
         ndms.append(dn if dn > up and dn > 0 else 0.0)
@@ -51,7 +69,10 @@ def _adx(highs, lows, closes, n=14):
         nds = nds - nds / n + ndms[i]
         pdi, ndi = 100 * pds / atr, 100 * nds / atr
         dxs.append(100 * abs(pdi - ndi) / max(pdi + ndi, 1e-9))
-    return sum(dxs[-n:]) / n
+    adx = sum(dxs[:n]) / n                    # Wilder seed
+    for dx in dxs[n:]:
+        adx = (adx * (n - 1) + dx) / n        # Wilder RMA — matches Pine ta.adx
+    return adx
 
 
 def _autocorr(closes, n=20):
@@ -79,7 +100,7 @@ def compute_regime(bars, iv30_hist, iv30_now: float) -> dict:
     rv7, rv21 = _rv(cs, 7), _rv(cs, 21)
     rvcc10, park10 = _rv(cs, 10), _parkinson(hs, ls, 10)
     ac20 = _autocorr(cs, 20)
-    atr = sum(max(hs[i] - ls[i], abs(hs[i] - cs[i - 1])) for i in range(-14, 0)) / 14
+    atr = _atr(hs[-120:], ls[-120:], cs[-120:])
     spot = cs[-1]
 
     ivp = (100.0 * sum(1 for v in iv30_hist if v < iv30_now) / len(iv30_hist)

@@ -12,7 +12,7 @@ def reg(trend="DN", iv_pctl=22.0, vrp=-1.8, rv_falling=False, adx=28.0,
     d = {"symbol": symbol, "trend": trend, "vol_state": "CMP", "iv_pctl": iv_pctl,
          "iv30": 14.0, "vrp": vrp, "rv7": 17.0, "rv21": 15.9, "rv_falling": rv_falling,
          "gamma_score": gamma_score, "gamma": "-g", "adx": adx, "bias": -2, "ac20": -0.07}
-    return RegimeView.from_fvs(d, {"verdict": verdict, "rr25_30d": -9.4})
+    return RegimeView.from_fvs(d, {"verdict": verdict, "rr25_30d": 9.4})
 
 
 class TestAxisDerivation(unittest.TestCase):

@@ -30,8 +30,8 @@ class Strategy(ABC):
              score: float, rationale: list[str],
              delta_band: tuple[float, float] | None = None,
              gamma_test: bool = True) -> Suggestion:
-        m = struct_metrics(ctx.spot, legs, ctx.today)
-        g = struct_greeks(ctx.spot, legs, ctx.today)
+        m = struct_metrics(ctx.spot, legs, ctx.today, q=ctx.q)
+        g = struct_greeks(ctx.spot, legs, ctx.today, q=ctx.q)
         liq = self.liquidity_pen(ctx, legs)
         s = Suggestion(strategy=self.key, label=label, legs=legs,
                        net_mid=m["entry"], greeks=g,

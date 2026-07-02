@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 
 from .ib_client import CHAIN_CACHE, PARAMS_CACHE, quote_many
 from .models import Slice
+from .pricing import RISK_FREE, q_for
 
 SCAN_DTE = (5, 50)
 
@@ -27,10 +28,15 @@ SURFACE_CFG = {   # symbol: (secType, exchange, tradingClass, is_index)
 }
 
 
-def k25(spot: float, iv: float, t_yr: float, cp: str) -> float:
-    """Strike at ~|delta|=.25 from ATM vol (z=.675)."""
-    z = 0.675 * iv * math.sqrt(max(t_yr, 1e-4))
-    return spot * math.exp(-z) if cp == "P" else spot * math.exp(z)
+def k25(spot: float, iv: float, t_yr: float, cp: str,
+        r: float = RISK_FREE, q: float = 0.0) -> float:
+    """Strike at |delta|~=.25 (Merton): K = S*exp(mu ± z), z=.6745*iv*sqrt(t),
+    mu=(r−q+iv²/2)t. Dropping mu put the quoted wings at ~22Δ/28Δ (measured
+    .219P/.283C at SPX 30d) — biasing every rr25 read off them."""
+    t = max(t_yr, 1e-4)
+    z = 0.6745 * iv * math.sqrt(t)
+    mu = (r - q + 0.5 * iv * iv) * t
+    return spot * math.exp(mu - z) if cp == "P" else spot * math.exp(mu + z)
 
 
 # ------------------------------------------------------------------ LIVE ----
@@ -107,7 +113,7 @@ def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], 
         iv = sum(a["ivs"]) / len(a["ivs"])
         t = (d - today).days / 365.0
         for cp in ("P", "C"):
-            ks = snap(k25(spot, iv, t, cp))
+            ks = snap(k25(spot, iv, t, cp, q=q_for(symbol)))
             p2.append((d, cp, ks,
                        Option(symbol, d.strftime("%Y%m%d"), ks, cp, opt_exch,
                               tradingClass=chain.tradingClass, currency="USD")))
@@ -171,8 +177,8 @@ def build_chain_mock(symbol: str, today: date) -> tuple[float, list[Slice], list
         slices.append(Slice(
             expiry=d, dte=dte, atm_strike=snap(spot), atm_iv=round(iv, 4),
             put25_iv=round(iv + half_rr, 4), call25_iv=round(iv - half_rr, 4),
-            put25_strike=snap(k25(spot, iv, t, "P")),
-            call25_strike=snap(k25(spot, iv, t, "C")),
+            put25_strike=snap(k25(spot, iv, t, "P", q=q_for(symbol))),
+            call25_strike=snap(k25(spot, iv, t, "C", q=q_for(symbol))),
             atm_spread_pct=0.04 if symbol in ("SPX", "SPY", "QQQ") else 0.09,
             oi_atm=8000))
     return spot, slices, strikes

@@ -12,7 +12,8 @@ from .events import event_flags, trading_today
 from .ib_client import BARS_CACHE, daily_bars, with_ib
 from .models import Context
 from .regime import build_gates, compute_regime, mock_bars, mock_iv_hist
-from .surface import FRONT_DTE, pair_table, term_stats
+from .pricing import q_for
+from .surface import FRONT_DTE, iv_cm, pair_table, term_stats
 
 
 def build_context(symbol: str, mode: str = "mock", today: date | None = None,
@@ -21,7 +22,7 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
     if mode == "mock":
         spot, slices, strikes = build_chain_mock(symbol, today)
         bars = mock_bars(symbol, spot, today)
-        iv30 = min(slices, key=lambda s: abs(s.dte - 30)).atm_iv * 100
+        iv30 = iv_cm(slices, 30) * 100
         ivh = mock_iv_hist(iv30 * 0.96)
     else:
         def job(ib):
@@ -46,7 +47,7 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
         if port:
             kw["port"] = port
         spot, slices, strikes, bars, ivh = with_ib(job, **kw)
-        iv30 = (min(slices, key=lambda s: abs(s.dte - 30)).atm_iv * 100
+        iv30 = (iv_cm(slices, 30) * 100
                 if slices else (ivh[-1] if ivh else 15.0))
 
     reg = compute_regime(bars, ivh, iv30)
@@ -54,7 +55,8 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
     ev = event_flags(today, symbol, FRONT_DTE[1])
     ctx = Context(symbol=symbol, spot=spot, today=today, slices=slices,
                   strikes=strikes, regime=reg, events=ev,
-                  gates=build_gates(reg, ev, today), mode=mode)
+                  gates=build_gates(reg, ev, today), mode=mode,
+                  q=q_for(symbol))
     ctx.pairs = pair_table(slices, today)
     ctx.regime["term"] = term_stats(slices)
     return ctx

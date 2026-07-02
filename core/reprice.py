@@ -18,7 +18,7 @@ from datetime import date
 from .chain import SURFACE_CFG
 from .ib_client import quote_many
 from .models import Leg
-from .pricing import struct_metrics
+from .pricing import q_for, struct_metrics
 
 GREEK_KEYS = ("delta", "gamma", "theta", "vega")
 
@@ -53,7 +53,7 @@ def reprice_cards(ib, symbol: str, spot: float, today: date,
                         expiry=date.fromisoformat(l["expiry"]),
                         qty=int(l["qty"]), iv=float(l["iv"]))
                     for l in c["legs_raw"]]
-        m = struct_metrics(spot, leg_objs, today, entry=live_mid)
+        m = struct_metrics(spot, leg_objs, today, entry=live_mid, q=q_for(symbol))
         c["max_profit"], c["max_loss"] = m["max_profit"], m["max_loss"]
         c["breakevens"] = m["breakevens"]
         c["rationale"].append(f"Live NBBO mid {live_mid:.2f} vs model "

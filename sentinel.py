@@ -190,7 +190,7 @@ class RegimeView:
     rv_falling: bool
     gamma_score: int      # FVS gamma_score (negative = unstable/whippy tape)
     term_verdict: str     # INVERTED FRONT / STEEP CONTANGO / CONTANGO / FLAT
-    rr25: float           # 25d risk reversal, vol pts (negative = put skew = equity norm)
+    rr25: float           # 25d RR, vol pts (FVS: put25 − call25; POSITIVE = put skew)
 
     @classmethod
     def from_fvs(cls, regime: dict, term: Optional[dict] = None,
@@ -231,7 +231,7 @@ class RegimeView:
         return ADJUSTMENT_MATRIX[(self.direction, self.vol_state)]
 
     def headline(self) -> str:
-        skew = ("put-skew" if self.rr25 < -2 else "call-skew" if self.rr25 > 2 else "flat-skew")
+        skew = ("put-skew" if self.rr25 > 2 else "call-skew" if self.rr25 < -2 else "flat-skew")
         return (f"{self.symbol}: {self.direction.value} / vol {self.vol_state.value} "
                 f"({'expanding' if self.vol_expanding else 'contracting'}) — "
                 f"IVpctl {self.iv_pctl:.0f}, VRP {self.vrp:+.1f}, ADX {self.adx:.0f}, "
@@ -519,7 +519,7 @@ def _demo() -> None:
     regime = {"symbol": "SPX", "trend": "DN", "vol_state": "CMP", "iv_pctl": 22.0,
               "iv30": 14.1, "vrp": -1.8, "rv7": 17.0, "rv21": 15.9, "rv_falling": False,
               "gamma_score": -2, "gamma": "-g", "adx": 28.0, "bias": -2, "ac20": -0.07}
-    term = {"verdict": "INVERTED FRONT", "rr25_30d": -9.4, "skew_rich": True}
+    term = {"verdict": "INVERTED FRONT", "rr25_30d": 9.4, "skew_rich": True}
     reg = RegimeView.from_fvs(regime, term)
 
     # Synthetic per-account books (would come from FVS book_greeks per account).

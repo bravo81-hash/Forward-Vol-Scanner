@@ -76,6 +76,7 @@ class Context:
     pairs: list[dict] = field(default_factory=list)   # fwd-vol pair table
     book: dict = field(default_factory=dict)          # current book greeks
     mode: str = "mock"
+    q: float = 0.0        # continuous div yield for model pricing (pricing.q_for)
 
     def slice_near(self, dte: int) -> Slice | None:
         if not self.slices:

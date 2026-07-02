@@ -18,6 +18,24 @@ def _iv_near(slices: list[Slice], dte: int) -> float:
     return s.atm_iv
 
 
+def iv_cm(slices: list[Slice], dte: int) -> float:
+    """Constant-maturity ATM IV at `dte` — linear in TOTAL VARIANCE between
+    the bracketing expiries, clamped at the ends. Nearest-slice substitution
+    read "iv9" off whichever Friday happened to be closest (6d or 13d),
+    labelling the term structure with the wrong maturities."""
+    ss = sorted(slices, key=lambda s: s.dte)
+    if dte <= ss[0].dte:
+        return ss[0].atm_iv
+    if dte >= ss[-1].dte:
+        return ss[-1].atm_iv
+    for a, b in zip(ss, ss[1:]):
+        if a.dte <= dte <= b.dte:
+            va, vb = a.atm_iv ** 2 * a.dte, b.atm_iv ** 2 * b.dte
+            v = va + (vb - va) * (dte - a.dte) / (b.dte - a.dte)
+            return math.sqrt(v / dte)
+    return ss[-1].atm_iv
+
+
 def forward_vol(iv1, t1, iv2, t2) -> float:
     if t2 <= t1:
         return float("nan")
@@ -77,7 +95,7 @@ def event_premium(slices: list[Slice], today: date, rv21: float) -> dict | None:
 def term_stats(slices: list[Slice]) -> dict:
     if len(slices) < 2:
         return {}
-    iv9, iv30, iv45 = (_iv_near(slices, d) for d in (9, 30, 45))
+    iv9, iv30, iv45 = (iv_cm(slices, d) for d in (9, 30, 45))
     rat_f, rat_b = iv9 / iv30, iv30 / iv45
     rr30 = min(slices, key=lambda s: abs(s.dte - 30)).rr25
     skew_rich = rr30 / (iv30 * 100) > 0.30      # rr25 > 30% of ATM = steep
