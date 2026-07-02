@@ -57,12 +57,25 @@ def family_priority(ctx: Context) -> tuple[list[tuple[str, str]], str]:
     else:
         if ev["opex_week"] and r["trend"] == "RNG" and r["gamma"] == "+g":
             fams.append(("butterfly", "OpEx pin window (+g, range)"))
+        if r["vol_state"] == "STR" and r["vrp"] > 2 and r["rv_falling"]:
+            # T2: graduate STR. Stressed-but-RICH (VRP > +2, realized falling)
+            # are the best-paid selling days; hard gate still sets the WARNING
+            # verdict, but the card is a defined-risk BWB at QUARTER size
+            # instead of a generic fallback.
+            fams.append(("bwb", f"Stressed-but-rich: VRP {r['vrp']:+.1f}v with RV "
+                                "falling — defined-risk BWB, QUARTER size"))
         if r["vol_state"] == "ELV":
             fams.append(("bwb", "Elevated IV — skew finances wings, vol crush pays"))
             fams.append(("condor", "Elevated IV alternative if rangebound"))
         if r["vol_state"] == "NRM" and r["trend"] == "RNG":
             fams.append(("condor", f"Normal vol, range, VRP {r['vrp']:+.1f}v"))
             fams.append(("butterfly", "OTM fly if Direction leans down"))
+        if r["vol_state"] == "NRM" and r["trend"] in ("UP", "DN"):
+            # T1: the missing matrix cell — 12.7% of backtest days fell here
+            # and every one had VRP > 0. Trend-side theta, same shape as the
+            # CMP+trend cell.
+            fams.append(("diagonal", f"Normal vol + {r['trend']} trend — trend-side theta"))
+            fams.append(("calendar", "No-direction fallback"))
         if r["vol_state"] == "CMP" and r["trend"] == "RNG":
             fams.append(("calendar", "Calm + range: cheap back vega, theta differential"))
             fams.append(("double_calendar", "Wider tent variant"))
@@ -86,6 +99,12 @@ def family_priority(ctx: Context) -> tuple[list[tuple[str, str]], str]:
                    ("calendar", "Best available pair, thin edge")]
         if r["vrp"] <= 0:                # selling is unpaid — lead with the debit spread
             ordered.reverse()
+    if not ctx.pairs and all(k in ("calendar", "double_calendar", "diagonal")
+                             for k, _ in ordered):
+        # T4: every ranked family needs a calendar pair and none exists today —
+        # guarantee one single-expiry defined-risk card instead of an empty board.
+        ordered.insert(1, ("butterfly",
+                           "Fallback: no valid calendar pair today — single-expiry defined-risk"))
     if any(g["code"] == "W" for g in ctx.gates):    # Friday: prefer net-debit
         # doctrine prefers long-vega debit on Fridays — rank those first as a
         # nudge, but DO NOT remove the others; the W gate carries the warning.

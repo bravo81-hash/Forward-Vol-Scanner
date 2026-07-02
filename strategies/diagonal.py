@@ -24,6 +24,8 @@ class Diagonal(Strategy):
             why = [f"{'Call' if up else 'Put'} side with trend ({ctx.regime['trend']}, bias {ctx.regime['bias']:+d})",
                    f"Short {f.dte}d {k_short:g} sits outside the {f.dte}d EM ({em:.0f} pts)",
                    f"Pair curve edge {p['edge']:+.2f}v"]
+            if p.get("fomc_between"):
+                why.append("FOMC sits BETWEEN the legs — long back vega through the print")
             out.append(self.make(ctx, f"{cp} diagonal {lbl}", legs,
                                  score=p["edge"] * 0.8 + abs(ctx.regime["bias"]) * 0.3,
                                  rationale=why, delta_band=band))

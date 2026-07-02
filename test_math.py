@@ -210,3 +210,61 @@ def test_sentinel_skew_label_matches_fvs_convention():
     hp = S.RegimeView.from_fvs(base, {"verdict": "CONTANGO", "rr25_30d": +6.}).headline()
     hc = S.RegimeView.from_fvs(base, {"verdict": "CONTANGO", "rr25_30d": -6.}).headline()
     assert "put-skew" in hp and "call-skew" in hc
+
+
+# ---------------------------------------------- frequency calibration (T1-T4)
+def _freq_ctx(reg_over, pairs=None):
+    from core.models import Context
+    reg = {"trend": "RNG", "vol_state": "NRM", "iv_pctl": 40., "iv30": 14.,
+           "iv_chg_pct": 0., "vrp": 1.5, "rv7": 12., "rv21": 12.5,
+           "rv_falling": True, "gamma_score": 1, "gamma": "+g", "adx": 15.,
+           "bias": 0, "ac20": 0., "term": {"verdict": "FLAT"}}
+    reg.update(reg_over)
+    ctx = Context("SPX", 6000., TODAY, [], [6000.], regime=reg,
+                  events={"fomc_dte": 999, "fomc_in_front": False,
+                          "opex_week": False, "post_opex": False,
+                          "ex_div": False}, gates=[])
+    if pairs is not None:
+        ctx.pairs = pairs
+    return ctx
+
+
+def test_t1_nrm_trend_routes_to_diagonal():
+    from selection.ranker import family_priority
+    fams, verdict = family_priority(_freq_ctx({"trend": "UP", "adx": 26.}))
+    assert fams[0][0] == "diagonal"          # the previously-missing cell
+    assert verdict == "TRADE"
+
+
+def test_t2_str_rich_and_calming_graduates_to_bwb():
+    from selection.ranker import family_priority
+    fams, _ = family_priority(_freq_ctx({"vol_state": "STR", "iv_pctl": 90.,
+                                         "vrp": 3.0, "rv_falling": True}))
+    assert any(k == "bwb" for k, _ in fams)
+
+
+def test_t2_str_unpaid_does_not_graduate():
+    from selection.ranker import family_priority
+    fams, _ = family_priority(_freq_ctx({"vol_state": "STR", "iv_pctl": 90.,
+                                         "vrp": 1.0, "rv_falling": True}))
+    assert not any("Stressed-but-rich" in why for _, why in fams)
+
+
+def test_t3_pair_table_flags_fomc_between_instead_of_killing():
+    from core.models import Slice
+    from core.surface import pair_table
+    today = date(2026, 7, 2)                 # next FOMC: 2026-07-29
+    f = Slice(date(2026, 7, 17), 15, 6000, 0.16)     # front before FOMC
+    b = Slice(date(2026, 8, 7), 36, 6000, 0.155)     # back after FOMC
+    rows = pair_table([f, b], today)
+    assert len(rows) == 1                    # pre-T3 this pair was excluded
+    assert rows[0]["fomc_between"] is True
+
+
+def test_t4_zero_pair_days_get_single_expiry_fallback():
+    from selection.ranker import family_priority
+    ctx = _freq_ctx({"vrp": -1.0, "term": {"verdict": "CONTANGO"}}, pairs=[])
+    fams, verdict = family_priority(ctx)
+    assert fams[0][0] == "calendar"          # doctrine lead unchanged
+    assert any(k == "butterfly" for k, _ in fams)    # but never an empty board
+    assert verdict.startswith("CAUTION")

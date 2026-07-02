@@ -51,8 +51,7 @@ def pair_table(slices: list[Slice], today: date) -> list[dict]:
         for b in slices:
             if not BACK_DTE[0] <= b.dte <= BACK_DTE[1] or b.dte - f.dte < MIN_GAP:
                 continue
-            if fomc_between(f.expiry, b.expiry):
-                continue                      # never buy the event in the back only
+            spans_fomc = fomc_between(f.expiry, b.expiry)   # T3: warn, don't kill
             fv = forward_vol(f.atm_iv, f.dte / 365, b.atm_iv, b.dte / 365)
             if math.isnan(fv):
                 continue
@@ -62,7 +61,8 @@ def pair_table(slices: list[Slice], today: date) -> list[dict]:
                          "b_iv": round(b.atm_iv * 100, 2),
                          "fwd": round(fv * 100, 2),
                          "edge": round((f.atm_iv - fv) * 100, 2),
-                         "fomc_in_front": fomc_within(f.expiry, today)})
+                         "fomc_in_front": fomc_within(f.expiry, today),
+                         "fomc_between": spans_fomc})
     rows.sort(key=lambda r: r["edge"], reverse=True)
     return rows
 
