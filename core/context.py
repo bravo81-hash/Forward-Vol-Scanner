@@ -53,10 +53,30 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
     reg = compute_regime(bars, ivh, iv30)
     reg["spot"] = spot
     ev = event_flags(today, symbol, FRONT_DTE[1])
+    # F3: session-freshness guard. `bars` are useRTH daily; the newest bar is
+    # the last completed session. Flag when it lags the expected session so a
+    # holiday/half-day/weekend run can't serve stale numbers as "today".
+    data = _freshness(bars, today, mode)
     ctx = Context(symbol=symbol, spot=spot, today=today, slices=slices,
                   strikes=strikes, regime=reg, events=ev,
                   gates=build_gates(reg, ev, today), mode=mode,
-                  q=q_for(symbol))
+                  q=q_for(symbol), data=data)
     ctx.pairs = pair_table(slices, today)
     ctx.regime["term"] = term_stats(slices)
     return ctx
+
+
+def _freshness(bars, today: date, mode: str) -> dict:
+    if mode == "mock":
+        return {"session": today.isoformat(), "fresh": True, "note": "mock data"}
+    if not bars:
+        return {"session": None, "fresh": False, "note": "no bars returned — TWS data feed?"}
+    last = bars[-1][0]
+    last = last.date() if hasattr(last, "date") else last
+    gap = (today - last).days if hasattr(last, "__sub__") else None
+    # >4 calendar days behind = a clear multi-session stale gap (weekend +
+    # holiday tolerated); intraday-before-close (last bar = yesterday) is fine.
+    stale = gap is not None and gap > 4
+    return {"session": str(last), "fresh": not stale, "gap_days": gap,
+            "note": (f"STALE — newest bar is {gap}d old; verify the session/feed"
+                     if stale else f"latest session {last}")}

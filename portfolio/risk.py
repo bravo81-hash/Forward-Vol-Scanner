@@ -40,6 +40,41 @@ def fit_score(book: dict, s: Suggestion) -> float:
     return round(score, 3)
 
 
+SIZE_FRAC = {"FULL": 1.0, "HALF": 0.5, "QUARTER": 0.25, "STAND": 0.0}
+
+
+def lots_for(greeks: dict, nlv: float | None, size: str = "FULL",
+             book: dict | None = None) -> dict:
+    """P1: max whole lots that keep the POST-TRADE book inside the vega/delta
+    budget, scaled by the recommended size fraction.
+
+    Budget headroom already consumed by the current book (if provided) is
+    subtracted, so sizing respects what is already on. Returns the binding
+    greek so the desk sees *why* it is capped. lots=0 means the book has no
+    room for this structure at this size.
+    """
+    bud = budget_for(nlv)
+    frac = SIZE_FRAC.get(size, 1.0)
+    bg = (book or {}).get("greeks", {}) if book else {}
+    caps = {}
+    for g in ("vega", "delta"):
+        per = abs(greeks.get(g, 0.0))
+        if per < 1e-9:
+            caps[g] = None                       # structure is flat in this greek
+            continue
+        headroom = max(bud[g] - abs(bg.get(g, 0.0)), 0.0)
+        caps[g] = headroom / per
+    live = {g: c for g, c in caps.items() if c is not None}
+    if not live:
+        return {"lots": 0, "binding": None, "nlv": nlv, "size": size,
+                "note": "structure flat in vega and delta — size by margin instead"}
+    binding = min(live, key=live.get)
+    lots = int(live[binding] * frac)
+    return {"lots": max(lots, 0), "binding": binding, "nlv": nlv, "size": size,
+            "vega_per_lot": round(greeks.get("vega", 0.0), 2),
+            "delta_per_lot": round(greeks.get("delta", 0.0), 3)}
+
+
 def book_warnings(book: dict) -> list[str]:
     if not book or "greeks" not in book:
         return []

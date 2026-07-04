@@ -127,7 +127,7 @@ def compute_regime(bars, iv30_hist, iv30_now: float) -> dict:
             "vrp": round(vrp, 2), "rv_falling": rv7 < rv21,
             "gamma_score": g, "gamma": "+g" if g >= 1 else "-g" if g <= -1 else "g?",
             "adx": round(adx, 1), "bias": bias, "ac20": round(ac20, 3),
-            "ccrange": round(rr, 3), "spot": spot}
+            "ccrange": round(rr, 3), "spot": spot, "atr": round(atr, 2)}
 
 
 def build_gates(reg: dict, ev: dict, today: date | None = None) -> list[dict]:

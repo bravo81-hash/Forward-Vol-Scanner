@@ -30,7 +30,7 @@ from portfolio.accounts import MOCK_ACCOUNTS, list_accounts
 from portfolio.book import book_greeks, fetch_positions, stress_book
 from portfolio.risk import book_warnings
 from selection.ranker import shortlist
-from store.log import log
+from store.log import log, log_scan
 
 import sentinel as S
 
@@ -72,9 +72,14 @@ def api_suggest():
     nlv = request.args.get("nlv", type=float)
     try:
         ctx = build_context(symbol, mode)
+        # F1: per-account mandate — SMSF/investing books cannot hold multi-expiry
+        # combos on EU cash-settled indices; the ranker drops+flags those.
+        investing = account in SENTINEL_INVESTING_ACCOUNTS
+        ctx.mandate = {"account": account, "investing": investing,
+                       "block_multi_expiry": investing and symbol in S.EU_CASH_INDEX}
         if mode == "live":
             def job(ib):
-                return fetch_positions(ib, symbol, account)
+                return fetch_positions(ib, symbol, account, with_greeks=True)  # F2
             try:
                 pos = with_ib(job)
                 ctx.book = book_greeks(ctx, pos)
@@ -99,6 +104,7 @@ def api_suggest():
         out["book_warnings"] = book_warnings(ctx.book)
         log("shortlist", symbol, {"verdict": out["verdict"],
                                   "cards": [c["label"] for c in out["cards"]]})
+        log_scan(out, account, mode)             # P3: structured, queryable row
         return jsonify(out)
     except Exception as e:                       # noqa: BLE001
         return jsonify({"error": str(e)}), 500

@@ -13,7 +13,24 @@ from __future__ import annotations
 
 from core.models import Context, Suggestion
 from core.surface import event_premium
+from selection.manage import management_plan
 from strategies import REGISTRY
+
+MULTI_EXPIRY = {"calendar", "double_calendar", "diagonal"}   # F1: SMSF-blockable
+
+
+def verdict_size(verdict: str, regime: dict, gates: list[dict]) -> str:
+    """F4: collapse the verdict/regime into a machine size field."""
+    v = verdict or ""
+    if v.startswith("WARNING") or "STAND" in v.upper():
+        return "STAND"
+    if "quarter" in v.lower():
+        return "QUARTER"
+    if ("half" in v.lower() or regime.get("gamma") == "-g"
+            or regime.get("vol_state") == "ELV"
+            or any(g["code"] == "F" for g in gates)):
+        return "HALF"
+    return "FULL"
 
 VRP_HARVEST_FLOOR = -1.5    # event harvest allowed down to this VRP only
 FRIDAY_OK = {"calendar", "double_calendar", "diagonal"}   # net-debit long-vega
@@ -117,7 +134,27 @@ def family_priority(ctx: Context) -> tuple[list[tuple[str, str]], str]:
 
 
 def shortlist(ctx: Context) -> dict:
+    from portfolio.risk import lots_for
+
     fams, verdict = family_priority(ctx)
+    size = verdict_size(verdict, ctx.regime, ctx.gates)
+
+    # F1: mandate — drop multi-expiry families this account cannot trade on an
+    # EU cash-settled index, and record why (never silently swallow).
+    mandate = ctx.mandate or {}
+    blocked_note = None
+    if mandate.get("block_multi_expiry"):
+        kept = [(k, w) for k, w in fams if k not in MULTI_EXPIRY]
+        if len(kept) != len(fams):
+            dropped = sorted({k for k, _ in fams if k in MULTI_EXPIRY})
+            blocked_note = (f"{mandate.get('account', 'account')}: "
+                            f"{', '.join(dropped)} blocked — multi-expiry combo on "
+                            f"EU cash-settled index; single-expiry only")
+            fams = kept
+        if not fams:                              # nothing left → single-expiry fallback
+            fams = [("condor", "Single-expiry only (mandate): defined-risk condor"),
+                    ("butterfly", "Single-expiry defined-risk fly")]
+
     cards: list[Suggestion] = []
     for key, why in fams:
         strat = REGISTRY[key]
@@ -131,11 +168,20 @@ def shortlist(ctx: Context) -> dict:
             if ctx.book:
                 c.fit = _fit(ctx, c)
                 c.score = round(c.score + c.fit, 3)
+            card_size = "QUARTER" if (key == "bwb" and "QUARTER" in why) else size
+            c.manage = management_plan(ctx, c)                    # P2
+            nlv = ctx.book.get("nlv") if isinstance(ctx.book, dict) else None
+            c.lots = lots_for(c.greeks, nlv, card_size, ctx.book)  # P1
+            c.lots["size"] = card_size
         cards.extend(cands)
     cards.sort(key=lambda s: s.score, reverse=True)
-    return {"symbol": ctx.symbol, "verdict": verdict,
+
+    if blocked_note:
+        verdict = f"{verdict}  ·  {blocked_note}"
+    return {"symbol": ctx.symbol, "verdict": verdict, "size": size,
             "regime": ctx.regime, "events": ctx.events,
             "gates": ctx.gates, "pairs": ctx.pairs[:4],
+            "mandate": mandate, "data": ctx.data,
             "cards": [c.to_dict() for c in cards]}
 
 

@@ -50,6 +50,8 @@ class Suggestion:
     margin: float | None = None
     liquidity_pen: float = 0.0
     fit: float = 0.0
+    manage: dict = field(default_factory=dict)   # P2: entry-time management plan
+    lots: dict = field(default_factory=dict)      # P1: per-account lot sizing
 
     def to_dict(self) -> dict:
         d = self.__dict__.copy()
@@ -77,6 +79,8 @@ class Context:
     book: dict = field(default_factory=dict)          # current book greeks
     mode: str = "mock"
     q: float = 0.0        # continuous div yield for model pricing (pricing.q_for)
+    mandate: dict = field(default_factory=dict)   # F1: per-account tradability rules
+    data: dict = field(default_factory=dict)      # F3: session/freshness metadata
 
     def slice_near(self, dte: int) -> Slice | None:
         if not self.slices:

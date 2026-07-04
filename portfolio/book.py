@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from core.chain import iv_at
+from core.ib_client import quote_many
 from core.models import Context, Leg
 from core.pricing import struct_greeks, struct_value
 
@@ -15,8 +16,9 @@ STRESS_SCENARIOS = [("-5% spot / IV+10 / 2d", -0.05, 0.10, 2),
                     ("+3% spot / IV-3 / 2d",  +0.03, -0.03, 2)]
 
 
-def fetch_positions(ib, symbol: str, account: str | None = None) -> list[dict]:
-    out = []
+def fetch_positions(ib, symbol: str, account: str | None = None,
+                    with_greeks: bool = False) -> list[dict]:
+    out, contracts = [], []
     for p in ib.positions():
         if account and p.account != account:
             continue
@@ -25,6 +27,19 @@ def fetch_positions(ib, symbol: str, account: str | None = None) -> list[dict]:
             out.append({"cp": c.right, "strike": float(c.strike),
                         "expiry": c.lastTradeDateOrContractMonth,
                         "qty": int(p.position), "conId": c.conId})
+            contracts.append(c)
+    if with_greeks and contracts:
+        # F2: pull live TWS modelGreeks so book_greeks can use IBKR truth
+        # instead of BSM. Best-effort — a partial/failed quote just leaves
+        # book_greeks on the model path.
+        try:
+            q = quote_many(ib, contracts, want_greeks=True)
+            for o in out:
+                g = (q.get(o["conId"]) or {}).get("greeks")
+                if g and g.get("delta") is not None:
+                    o["greeks"] = g
+        except Exception:                            # noqa: BLE001
+            pass
     return out
 
 
@@ -43,10 +58,22 @@ def book_greeks(ctx: Context, positions: list[dict]) -> dict:
     all_legs = _position_legs(ctx, positions)
     legs = [l for l in all_legs
             if (l.expiry - ctx.today).days <= CAMPAIGN_MAX_DTE]
-    g = struct_greeks(ctx.spot, legs, ctx.today, q=ctx.q) if legs else \
-        {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+    # F2: IBKR is canonical truth. If every in-window position carries live TWS
+    # modelGreeks, aggregate those (per-share, x signed qty — same units as
+    # struct_greeks); otherwise fall back to BSM model greeks.
+    in_window = [p for p, l in zip(positions, all_legs)
+                 if (l.expiry - ctx.today).days <= CAMPAIGN_MAX_DTE]
+    live = [p.get("greeks") for p in in_window]
+    if legs and all(isinstance(x, dict) and "delta" in x for x in live):
+        g = {k: round(sum(p["greeks"][k] * p["qty"] for p in in_window), 4)
+             for k in ("delta", "gamma", "theta", "vega")}
+        source = "tws"
+    else:
+        g = struct_greeks(ctx.spot, legs, ctx.today, q=ctx.q) if legs else \
+            {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+        source = "model"
     fronts = [max(0, (l.expiry - ctx.today).days) for l in legs if l.qty < 0]
-    return {"positions": len(positions), "greeks": g,
+    return {"positions": len(positions), "greeks": g, "greeks_source": source,
             "min_short_dte": min(fronts) if fronts else None,
             "gamma_flag": bool(fronts) and min(fronts) <= 7,
             "excluded_long_dte": len(all_legs) - len(legs)}

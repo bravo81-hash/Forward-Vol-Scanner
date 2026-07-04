@@ -4,3 +4,8 @@ __pycache__/
 *.lnk
 store/audit.sqlite
 Updated/
+
+store/audit.sqlite
+__pycache__/
+*.pyc
+.pytest_cache/
