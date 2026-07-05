@@ -26,6 +26,8 @@ class Diagonal(Strategy):
                    f"Pair curve edge {p['edge']:+.2f}v"]
             if p.get("fomc_between"):
                 why.append("FOMC sits BETWEEN the legs — long back vega through the print")
+            if p.get("macro_between"):
+                why.append(f"{', '.join(p['macro_between'])} sits BETWEEN the legs — weekly options price this")
             out.append(self.make(ctx, f"{cp} diagonal {lbl}", legs,
                                  score=p["edge"] * 0.8 + abs(ctx.regime["bias"]) * 0.3,
                                  rationale=why, delta_band=band))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from datetime import date
 from .models import Slice
-from .events import fomc_between, fomc_within
+from .events import fomc_between, fomc_within, macro_between, macro_within
 
 FRONT_DTE = (12, 21)
 BACK_DTE = (26, 45)
@@ -52,6 +52,7 @@ def pair_table(slices: list[Slice], today: date) -> list[dict]:
             if not BACK_DTE[0] <= b.dte <= BACK_DTE[1] or b.dte - f.dte < MIN_GAP:
                 continue
             spans_fomc = fomc_between(f.expiry, b.expiry)   # T3: warn, don't kill
+            spans_macro = macro_between(f.expiry, b.expiry)  # P5: same, for CPI/PPI/NFP
             fv = forward_vol(f.atm_iv, f.dte / 365, b.atm_iv, b.dte / 365)
             if math.isnan(fv):
                 continue
@@ -62,7 +63,9 @@ def pair_table(slices: list[Slice], today: date) -> list[dict]:
                          "fwd": round(fv * 100, 2),
                          "edge": round((f.atm_iv - fv) * 100, 2),
                          "fomc_in_front": fomc_within(f.expiry, today),
-                         "fomc_between": spans_fomc})
+                         "fomc_between": spans_fomc,
+                         "macro_in_front": macro_within(f.expiry, today),   # P5
+                         "macro_between": spans_macro})                    # P5
     rows.sort(key=lambda r: r["edge"], reverse=True)
     return rows
 

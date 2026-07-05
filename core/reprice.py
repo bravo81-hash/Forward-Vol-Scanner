@@ -21,6 +21,30 @@ from .models import Leg
 from .pricing import q_for, struct_metrics
 
 GREEK_KEYS = ("delta", "gamma", "theta", "vega")
+WING_SPREAD_WARN = 0.15   # P7: NBBO (ask-bid)/mid on any leg above this -> flag
+LIQ_PENALTY = 0.5         # score deduction when flagged (per doctrine: never a block)
+
+
+def assess_liquidity(legs_raw: list[dict], rows: dict) -> dict:
+    """P7 — pure, TWS-free: given a card's raw legs and their quote rows
+    ({(expiry,strike,cp): {bid,ask,mid,...} or None}), report which legs have
+    no two-sided quote and which have a wide NBBO spread. This runs the SAME
+    check whether repricing succeeded or fell back to model — previously a
+    missing quote silently kept model prices with no visible flag at all.
+    """
+    no_quote, wide = [], []
+    for l in legs_raw:
+        key = (l["expiry"], l["strike"], l["cp"])
+        r = rows.get(key)
+        tag = f"{l['strike']:g}{l['cp']}"
+        if not r or r.get("bid") is None or r.get("ask") is None or not r.get("mid"):
+            no_quote.append(tag)
+            continue
+        spr = (r["ask"] - r["bid"]) / r["mid"] if r["mid"] else 1.0
+        if spr > WING_SPREAD_WARN:
+            wide.append({"leg": tag, "spread_pct": round(spr * 100, 1)})
+    flagged = bool(no_quote or wide)
+    return {"flagged": flagged, "no_quote_legs": no_quote, "wide_legs": wide}
 
 
 def reprice_cards(ib, symbol: str, spot: float, today: date,
@@ -36,6 +60,18 @@ def reprice_cards(ib, symbol: str, spot: float, today: date,
     rows = {k: quotes.get(o.conId) for k, o in opts.items() if o.conId}
 
     for c in cards:
+        liq = assess_liquidity(c["legs_raw"], rows)     # P7: always assessed
+        c["liquidity"] = liq
+        if liq["flagged"]:
+            if liq["no_quote_legs"]:
+                c["rationale"].append("LIQUIDITY: no live quote on "
+                                      f"{', '.join(liq['no_quote_legs'])} — "
+                                      "model price only, check illiquidity/off-hours")
+            for w in liq["wide_legs"]:
+                c["rationale"].append(f"LIQUIDITY: {w['leg']} NBBO spread "
+                                      f"{w['spread_pct']:.0f}% — wide wing, check fill cost")
+            c["score"] = round(c["score"] - LIQ_PENALTY, 2)
+
         legs = [(l, rows.get((l["expiry"], l["strike"], l["cp"])))
                 for l in c["legs_raw"]]
         if any(r is None or r.get("mid") is None for _, r in legs):

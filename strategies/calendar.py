@@ -20,6 +20,8 @@ class Calendar(Strategy):
                 why.append("FOMC inside front leg — selling event premium, confirm front is rich")
             if p.get("fomc_between"):
                 why.append("FOMC sits BETWEEN the legs — long back vega through the print")
+            if p.get("macro_between"):
+                why.append(f"{', '.join(p['macro_between'])} sits BETWEEN the legs — weekly options price this")
             if p["edge"] < 0.5:
                 why.append("THIN edge — chain confirmation mandatory")
             out.append(self.make(ctx, f"ATM put cal {p['f_dte']}/{p['b_dte']}d",

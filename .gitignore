@@ -9,3 +9,4 @@ store/audit.sqlite
 __pycache__/
 *.pyc
 .pytest_cache/
+reports/

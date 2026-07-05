@@ -98,6 +98,8 @@ def compute_regime(bars, iv30_hist, iv30_now: float) -> dict:
     e8, e21, e50 = _ema(cs[-60:], 8), _ema(cs[-90:], 21), _ema(cs[-150:], 50)
     adx = _adx(hs, ls, cs)
     rv7, rv21 = _rv(cs, 7), _rv(cs, 21)
+    rv63 = _rv(cs, 63) if len(cs) >= 64 else rv21          # P6: HAR-lite input
+    har_rv = round(0.5 * rv7 + 0.3 * rv21 + 0.2 * rv63, 2)  # P6: forecast RV
     rvcc10, park10 = _rv(cs, 10), _parkinson(hs, ls, 10)
     ac20 = _autocorr(cs, 20)
     atr = _atr(hs[-120:], ls[-120:], cs[-120:])
@@ -118,13 +120,16 @@ def compute_regime(bars, iv30_hist, iv30_now: float) -> dict:
     trend = "RNG" if adx < ADX_THR else "UP" if e8 > e21 else "DN"
     vol = "CMP" if ivp < 25 else "NRM" if ivp < 60 else "ELV" if ivp < 85 else "STR"
     vrp = iv30_now - rv21
+    vrp_fwd = round(iv30_now - har_rv, 2)                   # P6: forward-looking VRP
+    vrp_flip = (vrp <= 0 < vrp_fwd) or (vrp > 0 >= vrp_fwd)  # P6: sign disagrees
     pz = (spot - e21) / atr if atr else 0.0
     bias = max(-2, min(2, (1 if pz > 0.5 else -1 if pz < -0.5 else 0) +
                        (1 if spot > e50 else -1)))
     return {"trend": trend, "vol_state": vol, "iv_pctl": round(ivp, 1),
             "iv30": round(iv30_now, 2), "iv_chg_pct": round(iv_chg, 2),
-            "rv7": round(rv7, 2), "rv21": round(rv21, 2),
+            "rv7": round(rv7, 2), "rv21": round(rv21, 2), "rv63": round(rv63, 2),
             "vrp": round(vrp, 2), "rv_falling": rv7 < rv21,
+            "har_rv": har_rv, "vrp_fwd": vrp_fwd, "vrp_flip": vrp_flip,  # P6
             "gamma_score": g, "gamma": "+g" if g >= 1 else "-g" if g <= -1 else "g?",
             "adx": round(adx, 1), "bias": bias, "ac20": round(ac20, 3),
             "ccrange": round(rr, 3), "spot": spot, "atr": round(atr, 2)}
@@ -148,12 +153,19 @@ def build_gates(reg: dict, ev: dict, today: date | None = None) -> list[dict]:
         add("G", "Unstable tape + elevated vol", True)
     if ev["fomc_in_front"]:
         add("F", f"FOMC in {ev['fomc_dte']}d — inside front-leg window", False)
+    if ev.get("macro_in_front"):
+        add("M", f"{ev['macro_type']} in {ev['macro_dte']}d — inside front-leg "
+                 "window (weekly options price this; verify the front is rich)", False)
     if ev["post_opex"]:
         add("O", "Post-OpEx week — vol expansion window", False)
     if ev["ex_div"]:
         add("X", "ETF ex-div week — no short ITM calls", False)
     if reg["vrp"] <= 0:
         add("P", f"VRP {reg['vrp']:+.1f}v — realized above implied, selling unpaid", False)
+    if reg.get("vrp_flip"):
+        add("N", f"Forward VRP {reg['vrp_fwd']:+.1f}v (HAR: 0.5·RV7+0.3·RV21+0.2·RV63="
+                 f"{reg['har_rv']:.1f}) disagrees with trailing {reg['vrp']:+.1f}v — "
+                 "a flip looks imminent as the RV window rolls", False)
     return gates
 
 

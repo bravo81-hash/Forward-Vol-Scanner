@@ -22,6 +22,8 @@ class DoubleCalendar(Strategy):
                    f"Curve edge {p['edge']:+.2f}v on pair {p['f_dte']}/{p['b_dte']}d"]
             if p.get("fomc_between"):
                 why.append("FOMC sits BETWEEN the legs — long back vega through the print")
+            if p.get("macro_between"):
+                why.append(f"{', '.join(p['macro_between'])} sits BETWEEN the legs — weekly options price this")
             out.append(self.make(ctx, f"Dbl cal {lbl}", legs,
                                  score=p["edge"] * 0.9, rationale=why))
         return out
