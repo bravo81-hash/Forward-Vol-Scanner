@@ -11,6 +11,8 @@ from datetime import date
 from .models import Leg
 
 RISK_FREE = 0.04
+MULT = 100    # index option contract multiplier — the per-unit -> Risk-Navigator
+              # conversion factor (underlying deltas, $/day theta, $/vol-pt vega)
 
 DIV_YIELD = {"SPX": 0.012, "SPY": 0.012, "NDX": 0.006, "QQQ": 0.006,
              "RUT": 0.011, "IWM": 0.011}

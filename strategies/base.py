@@ -6,7 +6,7 @@ from datetime import date
 
 from core.chain import iv_at
 from core.models import Context, Leg, Slice, Suggestion
-from core.pricing import struct_greeks, struct_metrics
+from core.pricing import MULT, struct_greeks, struct_metrics
 
 HOLD_MAX = 10
 FRONT_EXIT_DTE = 7      # any short leg must clear this at latest exit
@@ -39,7 +39,13 @@ class Strategy(ABC):
                        breakevens=m["breakevens"],
                        score=round(score - liq, 3), rationale=rationale,
                        liquidity_pen=round(liq, 3))
+        # targets run on PER-UNIT greeks (strategy delta bands are authored
+        # per-unit, e.g. "keep the spread inside +-0.10 delta")
         self._check_targets(ctx, s, delta_band or self.delta_band, gamma_test)
+        # card greeks published in RISK-NAVIGATOR units (x contract multiplier):
+        # delta = underlying deltas/lot, theta = $/day/lot, vega = $/vol-pt/lot,
+        # gamma = deltas gained per 1-pt move/lot — 1:1 with TWS.
+        s.greeks = {k: round(v * MULT, 2) for k, v in g.items()}
         return s
 
     delta_band: tuple[float, float] | None = None
@@ -56,7 +62,7 @@ class Strategy(ABC):
                 lever = ("shift strike toward the band" if self.key in
                          ("calendar", "double_calendar", "diagonal")
                          else "recenter shorts / rebalance by delta")
-                flags.append(f"Δ {d:+.2f} outside target {lo:+.2f}..{hi:+.2f} — {lever}")
+                flags.append(f"Δ {d*MULT:+.0f} outside target {lo*MULT:+.0f}..{hi*MULT:+.0f} — {lever}")
         if gamma_test and s.greeks["theta"] > 0:
             em1 = ctx.spot * ctx.regime["rv21"] / 100 / math.sqrt(252)
             gloss = 0.5 * abs(s.greeks["gamma"]) * em1 * em1

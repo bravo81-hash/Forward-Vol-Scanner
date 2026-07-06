@@ -80,11 +80,11 @@ def test_front_exit_rule():
 def test_fit_score_direction():
     from core.models import Suggestion
     from portfolio.risk import fit_score
-    book = {"greeks": {"delta": 0.0, "gamma": 0, "theta": 1.0, "vega": 11.0}}
+    book = {"greeks": {"delta": 0.0, "gamma": 0, "theta": 100.0, "vega": 1100.0}}
     long_vega = Suggestion("calendar", "x", [], 1, {"delta": 0, "gamma": 0,
-                           "theta": .5, "vega": 3.0}, 1, -1, [], 0, [])
+                           "theta": 50.0, "vega": 300.0}, 1, -1, [], 0, [])
     short_vega = Suggestion("condor", "x", [], -1, {"delta": 0, "gamma": 0,
-                            "theta": .5, "vega": -3.0}, 1, -1, [], 0, [])
+                            "theta": 50.0, "vega": -300.0}, 1, -1, [], 0, [])
     assert fit_score(book, short_vega) > fit_score(book, long_vega)
 
 

@@ -241,7 +241,12 @@ class RegimeView:
 # ============================================================ book view =====
 # Greek budgets per $100k NLV — mirrors FVS portfolio.risk so Sentinel stays
 # standalone but consistent with the entry app.
-BUDGET_PER_100K = {"vega": 12.0, "delta": 0.30, "theta_min": 0.0}
+# UNITS: Risk-Navigator convention (x contract multiplier) — delta in
+# underlying deltas, vega $ per vol pt, theta $ per day. Mirrors
+# portfolio.risk (delta band recalibrated Jul 2026: old 0.30 per-unit
+# == 30 RiskNav deltas/$100k ~= 200% NLV delta-dollars — a 14-delta book
+# read as neutral; now 5 deltas/$100k ~= 34% NLV).
+BUDGET_PER_100K = {"vega": 1200.0, "delta": 5.0, "theta_min": 0.0}
 
 
 def budget_for(nlv: Optional[float]) -> dict:
@@ -298,31 +303,31 @@ def detect_conflicts(reg: RegimeView, book: BookView, bud: dict) -> list[Conflic
     d_now = _sign(book.delta, d_tol * 0.5)
     if reg.direction is Direction.NEUTRAL:
         if abs(book.delta) > d_tol:
-            out.append(Conflict("delta", f"book delta {book.delta:+.2f} off-neutral "
-                                f"(±{d_tol:.2f}) in a range regime — recenter to flat",
+            out.append(Conflict("delta", f"book delta {book.delta:+.1f} off-neutral "
+                                f"(±{d_tol:.1f}) in a range regime — recenter to flat",
                                 {"delta": -_sign(book.delta)}, "act"))
     else:
         if d_now != 0 and d_now != want:
-            out.append(Conflict("delta", f"book delta {book.delta:+.2f} fights the "
+            out.append(Conflict("delta", f"book delta {book.delta:+.1f} fights the "
                                 f"{reg.direction.value} tape — add {'short' if want<0 else 'long'} delta",
                                 {"delta": want}, "act"))
         elif abs(book.delta) > d_tol:
-            out.append(Conflict("delta", f"book delta {book.delta:+.2f} over ±{d_tol:.2f} "
+            out.append(Conflict("delta", f"book delta {book.delta:+.1f} over ±{d_tol:.1f} "
                                 f"budget — trim toward neutral", {"delta": -_sign(book.delta)}, "warn"))
 
     # --- vega vs vol regime -------------------------------------------------
     v_now = _sign(book.vega, v_tol * 0.5)
     long_vega_crush = (reg.vol_state is VolState.RICH and reg.rv_falling and reg.iv_pctl >= 60)
     if v_now < 0 and reg.vol_expanding:
-        out.append(Conflict("vega", f"book vega {book.vega:+.1f} is SHORT into expanding vol "
+        out.append(Conflict("vega", f"book vega {book.vega:+.0f} is SHORT into expanding vol "
                             f"({reg.term_verdict}, VRP {reg.vrp:+.1f}) — add long vega / shift credit->debit",
                             {"vega": +1}, "act"))
     elif v_now > 0 and long_vega_crush:
-        out.append(Conflict("vega", f"book vega {book.vega:+.1f} is LONG into mean-reverting vol "
+        out.append(Conflict("vega", f"book vega {book.vega:+.0f} is LONG into mean-reverting vol "
                             f"(IVpctl {reg.iv_pctl:.0f}, RV falling) — trim vega / harvest",
                             {"vega": -1}, "act"))
     elif abs(book.vega) > v_tol:
-        out.append(Conflict("vega", f"book vega {book.vega:+.1f} over ±{v_tol:.0f} budget",
+        out.append(Conflict("vega", f"book vega {book.vega:+.0f} over ±{v_tol:.0f} budget",
                             {"vega": -_sign(book.vega)}, "warn"))
 
     # --- gamma / theta ------------------------------------------------------
@@ -440,9 +445,9 @@ def render(cards: list[AccountGuidance]) -> str:
         L.append(f"ACCOUNT {c.label}  [{c.pool}]")
         L.append(c.regime_headline)
         g, bud = c.greeks, c.budget
-        L.append(f"  book greeks: d{g['delta']:+.2f} g{g['gamma']:+.3f} "
-                 f"V{g['vega']:+.1f} t{g['theta']:+.2f}   "
-                 f"budget +-d{bud['delta']:.2f} +-V{bud['vega']:.0f}")
+        L.append(f"  book greeks: d{g['delta']:+.1f} g{g['gamma']:+.2f} "
+                 f"V{g['vega']:+.0f} t{g['theta']:+.0f}   "
+                 f"budget +-d{bud['delta']:.1f} +-V{bud['vega']:.0f}   (RiskNav units)")
         if c.aligned:
             L.append("  STATUS: aligned with regime — no adjustment forced.")
             L.append("  standing structures for this regime (reference):")
@@ -525,13 +530,13 @@ def _demo() -> None:
     # Synthetic per-account books (would come from FVS book_greeks per account).
     books = [
         BookView("U-TRAD-1", "Trading 1 (margin)", "trading", 250_000,
-                 delta=+0.92, gamma=-0.020, theta=+0.41, vega=-19.0,
+                 delta=+92.0, gamma=-2.0, theta=+41.0, vega=-1900.0,
                  min_short_dte=6, gamma_flag=True),
         BookView("U-TRAD-2", "Trading 2 (margin)", "trading", 100_000,
-                 delta=-0.05, gamma=-0.004, theta=+0.10, vega=+14.0,
+                 delta=-5.0, gamma=-0.4, theta=+10.0, vega=+400.0,
                  min_short_dte=30, gamma_flag=False),
         BookView("U-SMSF", "SMSF (cash)", "investing", 92_000,
-                 delta=+0.40, gamma=-0.006, theta=+0.05, vega=-6.0,
+                 delta=+40.0, gamma=-0.6, theta=+5.0, vega=-600.0,
                  min_short_dte=20, gamma_flag=False, smsf_eu_cash_block=True),
     ]
     print(render(advise(reg, books)))

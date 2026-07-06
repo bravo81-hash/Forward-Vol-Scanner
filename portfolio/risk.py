@@ -1,16 +1,22 @@
 """Per-surface risk budgets + portfolio-fit scoring.
 
-Budgets are per 1-lot book in greek units; tune in config below.
-fit_score rewards a suggestion that moves book vega/delta TOWARD the
-target band and penalises one that piles on in the same direction.
+UNITS: Risk-Navigator convention throughout (x contract multiplier) —
+delta = underlying deltas, vega = $ per vol point, theta = $ per day.
+A TWS Risk Navigator reading of "14 SPX deltas" is 14.0 here.
+
+DELTA BAND RECALIBRATION (Jul 2026): the old band was 0.30 per-unit per
+$100k == 30 RiskNav deltas per $100k ~= 200% of NLV in delta dollars at
+SPX 6800 — so a 14-delta book on $215k read as "neutral". The band is now
+5 underlying deltas per $100k (~34% NLV in delta dollars), so the same
+book correctly flags as off-neutral. Tune below.
 """
 from __future__ import annotations
 from core.models import Suggestion
 
 BUDGET_PER_100K = {   # |limit| per surface, per $100k of account NLV
-    "vega": 12.0,     # net vega (per 1 vol pt, per spread-lot units)
-    "delta": 0.30,    # net delta
-    "theta_min": 0.0, # net theta should stay >= 0 for a harvest book
+    "vega": 1200.0,   # $ per 1 vol pt (== 1.2% NLV per vol point)
+    "delta": 5.0,     # underlying deltas (~34% NLV delta-dollars at SPX ~6800)
+    "theta_min": 0.0, # net theta ($/day) should stay >= 0 for a harvest book
 }
 
 
@@ -71,8 +77,8 @@ def lots_for(greeks: dict, nlv: float | None, size: str = "FULL",
     binding = min(live, key=live.get)
     lots = int(live[binding] * frac)
     return {"lots": max(lots, 0), "binding": binding, "nlv": nlv, "size": size,
-            "vega_per_lot": round(greeks.get("vega", 0.0), 2),
-            "delta_per_lot": round(greeks.get("delta", 0.0), 3)}
+            "vega_per_lot": round(greeks.get("vega", 0.0), 0),
+            "delta_per_lot": round(greeks.get("delta", 0.0), 1)}
 
 
 def book_warnings(book: dict) -> list[str]:

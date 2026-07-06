@@ -17,9 +17,8 @@ from __future__ import annotations
 import math
 from datetime import timedelta
 
-from core.pricing import struct_value
+from core.pricing import MULT, struct_value
 
-MULT = 100
 HOLD_MAX = 10
 FRONT_EXIT_DTE = 7
 

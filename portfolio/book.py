@@ -5,7 +5,7 @@ from datetime import date, datetime
 from core.chain import iv_at
 from core.ib_client import quote_many
 from core.models import Context, Leg
-from core.pricing import struct_greeks, struct_value
+from core.pricing import MULT, struct_greeks, struct_value
 
 CAMPAIGN_MAX_DTE = 60   # legs beyond this belong to the separate long-DTE
                         # campaign (130/160/200 DTE) and must not drive this
@@ -59,18 +59,21 @@ def book_greeks(ctx: Context, positions: list[dict]) -> dict:
     legs = [l for l in all_legs
             if (l.expiry - ctx.today).days <= CAMPAIGN_MAX_DTE]
     # F2: IBKR is canonical truth. If every in-window position carries live TWS
-    # modelGreeks, aggregate those (per-share, x signed qty — same units as
-    # struct_greeks); otherwise fall back to BSM model greeks.
+    # modelGreeks, aggregate those; otherwise fall back to BSM model greeks.
+    # UNITS: Risk-Navigator convention (x contract multiplier) — delta in
+    # underlying deltas, theta $/day, vega $/vol-pt, gamma deltas-per-point.
+    # TWS Risk Navigator 14 deltas == 14 here (was 0.14 pre-fix).
     in_window = [p for p, l in zip(positions, all_legs)
                  if (l.expiry - ctx.today).days <= CAMPAIGN_MAX_DTE]
     live = [p.get("greeks") for p in in_window]
     if legs and all(isinstance(x, dict) and "delta" in x for x in live):
-        g = {k: round(sum(p["greeks"][k] * p["qty"] for p in in_window), 4)
+        g = {k: round(sum(p["greeks"][k] * p["qty"] for p in in_window) * MULT, 2)
              for k in ("delta", "gamma", "theta", "vega")}
         source = "tws"
     else:
-        g = struct_greeks(ctx.spot, legs, ctx.today, q=ctx.q) if legs else \
+        gm = struct_greeks(ctx.spot, legs, ctx.today, q=ctx.q) if legs else \
             {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+        g = {k: round(v * MULT, 2) for k, v in gm.items()}
         source = "model"
     fronts = [max(0, (l.expiry - ctx.today).days) for l in legs if l.qty < 0]
     return {"positions": len(positions), "greeks": g, "greeks_source": source,

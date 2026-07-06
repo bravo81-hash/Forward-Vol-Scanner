@@ -18,7 +18,7 @@ from datetime import date
 from .chain import SURFACE_CFG
 from .ib_client import quote_many
 from .models import Leg
-from .pricing import q_for, struct_metrics
+from .pricing import MULT, q_for, struct_metrics
 
 GREEK_KEYS = ("delta", "gamma", "theta", "vega")
 WING_SPREAD_WARN = 0.15   # P7: NBBO (ask-bid)/mid on any leg above this -> flag
@@ -82,8 +82,9 @@ def reprice_cards(ib, symbol: str, spot: float, today: date,
         c["net_mid"] = live_mid
         c["mid_src"] = "live"
         if all(r.get("greeks") for _, r in legs):
+            # RiskNav units (x MULT) — matches strategies.base card greeks
             c["greeks"] = {k: round(sum(l["qty"] * r["greeks"][k]
-                                        for l, r in legs), 4)
+                                        for l, r in legs) * MULT, 2)
                            for k in GREEK_KEYS}
         leg_objs = [Leg(cp=l["cp"], strike=float(l["strike"]),
                         expiry=date.fromisoformat(l["expiry"]),

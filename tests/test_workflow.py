@@ -25,22 +25,22 @@ def _ctx(**over):
 
 # ---------------------------------------------------- P1 sizing -------------
 def test_lots_respect_vega_budget():
-    g = {"vega": 6.0, "delta": 0.02, "gamma": 0.0, "theta": 0.0}
-    r = lots_for(g, 200_000, "FULL")           # vega budget = 24 -> 4 lots
+    g = {"vega": 600.0, "delta": 2.0, "gamma": 0.0, "theta": 0.0}   # $600/lot
+    r = lots_for(g, 200_000, "FULL")           # vega budget = $2400 -> 4 lots
     assert r["lots"] == 4 and r["binding"] == "vega"
 
 
 def test_lots_scale_with_size_fraction():
-    g = {"vega": 6.0, "delta": 0.02}
+    g = {"vega": 600.0, "delta": 2.0}
     assert lots_for(g, 200_000, "FULL")["lots"] == 4
     assert lots_for(g, 200_000, "HALF")["lots"] == 2
     assert lots_for(g, 200_000, "QUARTER")["lots"] == 1
 
 
 def test_lots_subtract_existing_book():
-    g = {"vega": 6.0, "delta": 0.02}
-    book = {"greeks": {"vega": 12.0, "delta": 0.0, "gamma": 0, "theta": 0}, "nlv": 200_000}
-    # budget 24, already 12 used -> 12 headroom -> 2 lots
+    g = {"vega": 600.0, "delta": 2.0}
+    book = {"greeks": {"vega": 1200.0, "delta": 0.0, "gamma": 0, "theta": 0}, "nlv": 200_000}
+    # budget $2400, already $1200 used -> $1200 headroom -> 2 lots
     assert lots_for(g, 200_000, "FULL", book)["lots"] == 2
 
 
@@ -125,7 +125,7 @@ def test_book_greeks_prefers_tws_when_present():
     pos = [{"cp": "C", "strike": 6000, "expiry": exp, "qty": 2, "conId": 1, "greeks": tws}]
     bg = book_greeks(ctx, pos)
     assert bg["greeks_source"] == "tws"
-    assert abs(bg["greeks"]["delta"] - 0.20) < 1e-9      # 0.10 * qty 2
+    assert abs(bg["greeks"]["delta"] - 20.0) < 1e-9      # 0.10/opt x qty 2 x MULT
 
 
 def test_book_greeks_falls_back_to_model():
@@ -158,3 +158,38 @@ def test_shortlist_attaches_lots_and_manage():
     assert "lots" in c and "size" in c["lots"]
     assert "manage" in c and "pt_dollars" in c["manage"] and "triggers" in c["manage"]
     assert out["size"] in ("FULL", "HALF", "QUARTER", "STAND")
+
+
+# ------------------------------------------- greek UNITS regression (Jul 2026)
+def test_delta_units_match_risk_navigator():
+    """The reported bug: TWS Risk Navigator showed 14 SPX deltas; the app
+    showed 0.14 and called it neutral. Book greeks are now RiskNav units."""
+    ctx = _ctx()
+    exp = (TODAY + timedelta(days=30)).strftime("%Y%m%d")
+    pos = [{"cp": "C", "strike": 6000, "expiry": exp, "qty": 1, "conId": 1,
+            "greeks": {"delta": 0.14, "gamma": 0.001, "theta": -0.05, "vega": 0.9}}]
+    bg = book_greeks(ctx, pos)
+    assert bg["greeks"]["delta"] == 14.0          # was 0.14 pre-fix
+
+
+def test_model_path_also_risknav_units():
+    ctx = _ctx()
+    exp = (TODAY + timedelta(days=30)).strftime("%Y%m%d")
+    pos = [{"cp": "C", "strike": ctx.spot, "expiry": exp, "qty": 1, "conId": 1}]
+    d = book_greeks(ctx, pos)["greeks"]["delta"]
+    assert 40 <= d <= 65                          # ~ATM call = ~50 underlying deltas
+
+
+def test_recalibrated_band_flags_the_reported_book():
+    from portfolio.risk import budget_for
+    band = budget_for(215_000)["delta"]           # $215k account
+    assert band < 14.0                            # 14 deltas is now OFF-neutral
+    assert 8.0 < band < 13.0                      # ~10.75: 5 deltas per $100k
+
+
+def test_card_greeks_published_in_dollar_units():
+    ctx = _ctx()
+    out = shortlist(ctx)
+    g = out["cards"][0]["greeks"]
+    # theta/vega now $-scaled per lot: a per-unit book would sit under ~1.0
+    assert any(abs(g[k]) >= 5 for k in ("vega", "theta", "delta"))

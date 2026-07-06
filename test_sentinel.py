@@ -43,26 +43,26 @@ class TestConflicts(unittest.TestCase):
         self.bud = budget_for(250_000)
 
     def test_long_delta_into_bearish(self):
-        b = BookView("A", "A", "trading", 250_000, delta=+0.9, gamma=-0.02,
-                     theta=+0.4, vega=-19, min_short_dte=6, gamma_flag=True)
+        b = BookView("A", "A", "trading", 250_000, delta=+90.0, gamma=-2.0,
+                     theta=+40.0, vega=-1900, min_short_dte=6, gamma_flag=True)
         names = {c.name for c in detect_conflicts(self.r, b, self.bud)}
         self.assertEqual(names, {"delta", "vega", "gamma"})
 
     def test_short_vega_into_expansion(self):
-        b = BookView("A", "A", "trading", 250_000, delta=0.0, gamma=+0.01,
-                     theta=+0.1, vega=-20, min_short_dte=30, gamma_flag=False)
+        b = BookView("A", "A", "trading", 250_000, delta=0.0, gamma=+1.0,
+                     theta=+10.0, vega=-2000, min_short_dte=30, gamma_flag=False)
         vega_c = [c for c in detect_conflicts(self.r, b, self.bud) if c.name == "vega"]
         self.assertTrue(vega_c and vega_c[0].need["vega"] == +1)
 
     def test_aligned_book_no_conflict(self):
-        b = BookView("A", "A", "trading", 250_000, delta=-0.1, gamma=+0.01,
-                     theta=+0.1, vega=+5, min_short_dte=30, gamma_flag=False)
+        b = BookView("A", "A", "trading", 250_000, delta=-1.0, gamma=+1.0,
+                     theta=+10.0, vega=+500, min_short_dte=30, gamma_flag=False)
         self.assertEqual(detect_conflicts(self.r, b, self.bud), [])
 
     def test_long_vega_crush_in_rich(self):
         r = reg(iv_pctl=80, vrp=+3.0, rv_falling=True, verdict="CONTANGO")  # RICH, contracting
-        b = BookView("A", "A", "trading", 250_000, delta=0.0, gamma=-0.01,
-                     theta=+0.2, vega=+20, min_short_dte=30, gamma_flag=False)
+        b = BookView("A", "A", "trading", 250_000, delta=0.0, gamma=-1.0,
+                     theta=+20.0, vega=+2000, min_short_dte=30, gamma_flag=False)
         vega_c = [c for c in detect_conflicts(r, b, budget_for(250_000)) if c.name == "vega"]
         self.assertTrue(vega_c and vega_c[0].need["vega"] == -1)
 
@@ -89,16 +89,16 @@ class TestStructureSelection(unittest.TestCase):
 class TestSMSFBlock(unittest.TestCase):
     def test_calendar_blocked_on_spx_smsf(self):
         r = reg(symbol="SPX")
-        b = BookView("SMSF", "SMSF", "investing", 92_000, delta=+0.4, gamma=-0.006,
-                     theta=+0.05, vega=-6, min_short_dte=20, smsf_eu_cash_block=True)
+        b = BookView("SMSF", "SMSF", "investing", 92_000, delta=+40.0, gamma=-0.6,
+                     theta=+5.0, vega=-600, min_short_dte=20, smsf_eu_cash_block=True)
         card = advise(r, [b])[0]
         cal = [s for s in card.suggestions if s.family == "put_calendar"]
         self.assertTrue(cal and cal[0].blocked)
 
     def test_calendar_not_blocked_on_single_name(self):
         r = reg(symbol="AAPL")
-        b = BookView("SMSF", "SMSF", "investing", 92_000, delta=+0.4, gamma=-0.006,
-                     theta=+0.05, vega=-6, min_short_dte=20, smsf_eu_cash_block=True)
+        b = BookView("SMSF", "SMSF", "investing", 92_000, delta=+40.0, gamma=-0.6,
+                     theta=+5.0, vega=-600, min_short_dte=20, smsf_eu_cash_block=True)
         card = advise(r, [b])[0]
         cal = [s for s in card.suggestions if s.family == "put_calendar"]
         self.assertTrue(all(not c.blocked for c in cal))
@@ -106,12 +106,12 @@ class TestSMSFBlock(unittest.TestCase):
 
 class TestBudget(unittest.TestCase):
     def test_scales_with_nlv(self):
-        self.assertAlmostEqual(budget_for(200_000)["vega"], 24.0)
-        self.assertAlmostEqual(budget_for(100_000)["delta"], 0.30)
-        self.assertAlmostEqual(budget_for(50_000)["vega"], 6.0)
+        self.assertAlmostEqual(budget_for(200_000)["vega"], 2400.0)
+        self.assertAlmostEqual(budget_for(100_000)["delta"], 5.0)
+        self.assertAlmostEqual(budget_for(50_000)["vega"], 600.0)
 
     def test_floor(self):
-        self.assertAlmostEqual(budget_for(10_000)["vega"], 12.0 * 0.25)
+        self.assertAlmostEqual(budget_for(10_000)["vega"], 1200.0 * 0.25)
 
 
 class TestReference(unittest.TestCase):
