@@ -52,6 +52,7 @@ padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:
  <select id="acct" style="background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:6px"></select>
  <button id="scan">Scan</button>
  <button id="sentinel" title="Portfolio adjustment advisor — per-account guidance">Sentinel</button>
+ <button id="direction" title="Objective structure selection — delta vs vol play, then the ranked structure for your intent">Direction</button>
  <span id="status">idle</span>
 </header>
 <div id="out"></div>
@@ -73,7 +74,63 @@ $("modes").onclick=e=>{const b=e.target.closest("button");if(!b)return;MODE=b.da
  document.querySelectorAll("#modes button").forEach(x=>x.classList.toggle("on",x.dataset.m===MODE));loadAccts();};
 $("scan").onclick=()=>{VIEW="scan";scan();};
 $("sentinel").onclick=()=>{VIEW="sentinel";sentinel();};
-function refresh(){return VIEW==="sentinel"?sentinel():scan();}
+$("direction").onclick=()=>{VIEW="direction";direction(false);};
+function refresh(){return VIEW==="sentinel"?sentinel():VIEW==="direction"?direction(false):scan();}
+// ---------------------------------------------------------- Direction view --
+let DINTENT="auto",DMODE="auto",DLAST=null;
+function dctl(){
+ const sym=($("dsym")&&$("dsym").value.trim().toUpperCase())||SYM;
+ return `<div class="ctxrow" style="align-items:center">
+  <input id="dsym" value="${sym}" style="background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:6px;width:80px;font:inherit;text-transform:uppercase" placeholder="ticker">
+  <span class="tabs" id="dintent">${["long","short","vol","auto"].map(x=>`<button data-i="${x}" class="${x===DINTENT?'on':''}">${x==="long"?"Long Δ":x==="short"?"Short Δ":x==="vol"?"Vol":"Auto"}</button>`).join("")}</span>
+  <span class="modes" id="dmode">${["auto","live","yf","mock"].map(x=>`<button data-m="${x}" class="${x===DMODE?'on':''}">${x}</button>`).join("")}</span>
+  <button id="dgo">Go</button></div>
+  <div class="bookbar">GATE 1 — delta vs vol play (forward VRP) · GATE 2 — structure matrix (IV band × 25Δ skew × term). Advisory, never a block. yf = delayed ~15-20 min; SPX/NDX/RUT proxied via SPY/QQQ/IWM.</div>
+  <div id="dres"></div>`;
+}
+function direction(run){
+ $("out").innerHTML=dctl();
+ $("dintent").onclick=e=>{const b=e.target.closest("button");if(!b)return;DINTENT=b.dataset.i;
+  document.querySelectorAll("#dintent button").forEach(x=>x.classList.toggle("on",x.dataset.i===DINTENT));};
+ $("dmode").onclick=e=>{const b=e.target.closest("button");if(!b)return;DMODE=b.dataset.m;
+  document.querySelectorAll("#dmode button").forEach(x=>x.classList.toggle("on",x.dataset.m===DMODE));};
+ $("dgo").onclick=dfetch;
+ $("dsym").onkeydown=e=>{if(e.key==="Enter")dfetch();};
+ if(DLAST)renderDirection(DLAST);
+ if(run)dfetch();
+}
+async function dfetch(){
+ const sym=$("dsym").value.trim().toUpperCase()||SYM;
+ $("status").textContent=`direction ${sym} ${DINTENT} (${DMODE})…`;
+ try{
+  const r=await fetch(`/api/direction?symbol=${sym}&intent=${DINTENT}&mode=${DMODE}`);
+  const d=await r.json();if(d.error)throw new Error(d.error);
+  DLAST=d;renderDirection(d);
+  $("status").textContent=`${sym} · ${d.mode} · ${new Date().toLocaleTimeString()}`;
+ }catch(e){$("status").textContent="error";toast("Direction failed: "+e.message);}
+}
+function renderDirection(d){
+ const inp=d.inputs;
+ const acls=/STAND ASIDE|NO VOL EDGE/.test(d.action)?"warn":"go";
+ let h=`<div class="verdict ${acls}">${d.action}</div>`;
+ h+=`<div class="bookbar">Gate 1: ${d.play.replace("_"," ")}${d.side?` · side: ${d.side}`:""} · intent: ${d.intent}</div>`;
+ h+=`<ul class="why">${d.play_why.map(x=>`<li>${x}</li>`).join("")}</ul>`;
+ h+=`<div class="ctxrow">
+  <span class="chip">IV30 <b>${inp.iv30}</b> band <b>${inp.iv_band}</b> (${inp.iv_band_src})</span>
+  <span class="chip">VRP <b>${fmt(inp.vrp,1)}v</b> fwd <b>${fmt(inp.vrp_fwd,1)}v</b> HAR ${inp.har_rv}</span>
+  <span class="chip">rr25 <b>${fmt(inp.rr25_30d,1)}v</b> skew <b>${inp.skew_rich?"RICH":"norm"}</b></span>
+  <span class="chip">term <b>${inp.term||"—"}</b></span>
+  <span class="chip">bias <b>${fmt(inp.bias,0)}</b> trend <b>${inp.trend}</b></span>
+  <span class="chip">spot <b>${inp.spot}</b></span></div>`;
+ if(d.structures.length){
+  h+=`<div class="cards">`+d.structures.map(s=>
+   `<div class="card"><div class="fam">#${s.rank}</div><h3>${s.label}</h3>
+    <ul class="why"><li>${s.why}</li></ul></div>`).join("")+`</div>`;
+ }
+ if(d.notes.length)h+=`<div class="warnbox">${d.notes.map(n=>"⚠ "+n).join("<br>")}</div>`;
+ h+=`<div class="bookbar">${d.data.note||""}${d.fallback_chain?` · fallbacks tried: ${d.fallback_chain.join(" | ")}`:""}</div>`;
+ $("dres").innerHTML=h;
+}
 function toast(t){const e=$("toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",6000);}
 function fmt(x,d=2){return(x>=0?"+":"")+(+x).toFixed(d);}
 async function scan(){

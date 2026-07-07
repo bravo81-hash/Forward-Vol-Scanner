@@ -64,6 +64,57 @@ def api_accounts():
         return jsonify({"error": str(e)}), 500
 
 
+@app.get("/api/direction")
+def api_direction():
+    """Direction tab: objective structure selection for a stated intent.
+
+    symbol: any ticker (SURFACE_CFG symbols usable live; anything else
+            resolves via yfinance).
+    intent: long | short | vol | auto   (auto = regime bias decides side)
+    mode:   auto | live | yf | mock     (auto = TWS -> yfinance -> mock)
+    """
+    from core.chain import MOCK, SURFACE_CFG
+    from core.yf_client import build_context_yf
+    from selection.direction import direction_verdict
+
+    symbol = request.args.get("symbol", "SPX").upper().strip()
+    intent = request.args.get("intent", "auto").lower()
+    mode = request.args.get("mode", "auto").lower()
+    if intent not in ("long", "short", "vol", "auto"):
+        return jsonify({"error": f"bad intent '{intent}'"}), 400
+
+    errors, ctx = [], None
+    order = {"live": ["live"], "yf": ["yf"], "mock": ["mock"],
+             "auto": (["live", "yf", "mock"] if symbol in SURFACE_CFG
+                      else ["yf"])}.get(mode)
+    if order is None:
+        return jsonify({"error": f"bad mode '{mode}'"}), 400
+    for m in order:
+        if m == "live" and symbol not in SURFACE_CFG:
+            errors.append("live: symbol not in SURFACE_CFG")
+            continue
+        if m == "mock" and symbol not in MOCK:
+            errors.append("mock: no synthetic surface for symbol")
+            continue
+        try:
+            ctx = (build_context_yf(symbol) if m == "yf"
+                   else build_context(symbol, m))
+            break
+        except Exception as e:                   # noqa: BLE001
+            errors.append(f"{m}: {e}")
+    if ctx is None:
+        return jsonify({"error": "; ".join(errors) or "no data source"}), 502
+
+    out = direction_verdict(ctx, intent)
+    if errors:
+        out["fallback_chain"] = errors
+    log("direction", symbol, {"intent": intent, "mode": ctx.mode,
+                              "play": out["play"], "side": out["side"],
+                              "top": (out["structures"][0]["key"]
+                                      if out["structures"] else None)})
+    return jsonify(out)
+
+
 @app.get("/api/suggest")
 def api_suggest():
     symbol = request.args.get("symbol", "SPX").upper()

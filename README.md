@@ -31,6 +31,26 @@ static/      browser UI (cards, risk graphs, book bar)
 tests/       mock-mode suite: python -m pytest tests/
 ```
 
+## Direction tab (`/api/direction`)
+Objective structure selection for a stated intent — any ticker, three data
+modes. Two gates (`selection/direction.py`), both advisory:
+* **Gate 1 — play type**: forward VRP (`vrp_fwd`, IV30 vs HAR forecast)
+  decides delta play vs vol play: `>= +3v` SELL VOL, `<= -2v` BUY VOL,
+  FOMC event premium rich + inverted front → EVENT VOL, else DELTA.
+* **Gate 2 — structure matrix**: for `long` / `short` delta intent, ranks
+  credit vertical / debit vertical / OTM calendar / OTM butterfly from
+  **IV band × 25Δ skew × term verdict**, with the index put-skew asymmetry
+  handled explicitly on the short side (call credit is the cheap wing;
+  put debit spreads are part skew-subsidised). `auto` intent resolves the
+  side from the regime bias; `vol` intent maps the Gate-1 verdict to the
+  existing strategy families.
+
+Modes: `mode=auto` tries **TWS → yfinance → mock**. The yfinance fallback
+(`core/yf_client.py`, `pip install yfinance`) works for **any ticker**
+(AAPL etc.), is delayed ~15-20 min, proxies SPX/NDX/RUT chains via
+SPY/QQQ/IWM, and takes IV-rank history from ^VIX/^VXN/^RVX; single names
+with no IV history fall back to a flagged **IV30/HAR ratio** band.
+
 ## TWS request budget (per live refresh, per symbol)
 * 1 underlying quote + ~4 x n_expiries option lines — **batched in groups
   of 40 and cancelled immediately** (`core/ib_client.quote_many`)
