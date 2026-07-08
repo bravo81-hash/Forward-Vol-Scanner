@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentinel — Adjustment Matrix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0E14; --panel:#101725; --panel2:#141C2D; --raise:#18202F;
+    --line:#243049; --line-soft:#1B2333;
+    --txt:#E7EDF6; --muted:#8A98AF; --faint:#5C6A82;
+    --debit:#41C0F2; --debit-soft:rgba(65,192,242,.13); --debit-dim:rgba(65,192,242,.5);
+    --credit:#F2B23E; --credit-soft:rgba(242,178,62,.13); --credit-dim:rgba(242,178,62,.5);
+    --pos:#34D6A0; --neg:#FB7488; --zero:#43526E;
+    --bear:#F0746F; --neutral:#9AA8C0; --bull:#52D08A;
+    --display:'Space Grotesk',system-ui,'Segoe UI',sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --r:12px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 600px at 78% -10%, rgba(65,192,242,.06), transparent 60%),
+      radial-gradient(1000px 500px at 0% 0%, rgba(242,178,62,.05), transparent 55%),
+      var(--bg);
+    color:var(--txt); font-family:var(--mono); font-size:15px; line-height:1.5;
+    -webkit-font-smoothing:antialiased; padding-bottom:60px;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:0 22px}
+
+  /* ---------- masthead ---------- */
+  .mast{padding:46px 0 26px; position:relative}
+  .eyebrow{font-family:var(--mono); font-size:11.5px; letter-spacing:.32em; text-transform:uppercase;
+    color:var(--faint); display:flex; align-items:center; gap:10px}
+  .eyebrow::after{content:""; height:1px; flex:1; background:linear-gradient(90deg,var(--line),transparent)}
+  h1{font-family:var(--display); font-weight:600; letter-spacing:-.02em; line-height:1.02;
+    font-size:clamp(30px,4.6vw,50px); margin:.32em 0 .18em}
+  h1 .b{color:var(--debit)} h1 .c{color:var(--credit)}
+  .thesis{font-family:var(--display); font-weight:400; color:var(--muted);
+    font-size:clamp(15px,1.7vw,18px); max-width:62ch}
+  .thesis strong{color:var(--txt); font-weight:600}
+  .hero-curves{display:grid; grid-template-columns:repeat(6,1fr); gap:14px; margin:26px 0 6px; opacity:.9}
+  .hero-curves .hc{height:46px}
+  .hero-curves svg{width:100%; height:100%}
+
+  /* ---------- control bar ---------- */
+  .controls{display:flex; flex-wrap:wrap; gap:18px 26px; align-items:center;
+    padding:16px 18px; margin-top:22px; background:var(--panel);
+    border:1px solid var(--line-soft); border-radius:var(--r)}
+  .ctl-group{display:flex; align-items:center; gap:10px}
+  .ctl-label{font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint)}
+  .pills{display:flex; gap:6px; flex-wrap:wrap}
+  .pill{font-family:var(--mono); font-size:12px; color:var(--muted); cursor:pointer;
+    padding:5px 11px; border-radius:999px; border:1px solid var(--line);
+    background:transparent; transition:.16s; user-select:none}
+  .pill:hover{border-color:var(--faint); color:var(--txt)}
+  .pill[aria-pressed="true"]{background:var(--raise); color:var(--txt); border-color:var(--faint)}
+  .pill.bear[aria-pressed="true"]{border-color:var(--bear); color:var(--bear)}
+  .pill.neut[aria-pressed="true"]{border-color:var(--neutral); color:var(--neutral)}
+  .pill.bull[aria-pressed="true"]{border-color:var(--bull); color:var(--bull)}
+  .key{display:flex; gap:16px; flex-wrap:wrap; margin-left:auto}
+  .key span{display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--muted)}
+  .dot{width:10px; height:10px; border-radius:3px}
+  .dot.d{background:var(--debit)} .dot.c{background:var(--credit)}
+  .dot.p{background:var(--pos)} .dot.n{background:var(--neg)}
+  .switch{display:inline-flex; align-items:center; gap:9px; cursor:pointer; user-select:none}
+  .track{width:38px; height:21px; border-radius:999px; background:var(--line); position:relative; transition:.18s}
+  .track::after{content:""; position:absolute; top:2px; left:2px; width:17px; height:17px; border-radius:50%;
+    background:var(--muted); transition:.18s}
+  .switch[aria-pressed="true"] .track{background:var(--credit-soft); box-shadow:inset 0 0 0 1px var(--credit-dim)}
+  .switch[aria-pressed="true"] .track::after{transform:translateX(17px); background:var(--credit)}
+  .switch .t{font-size:12.5px; color:var(--muted)} .switch[aria-pressed="true"] .t{color:var(--txt)}
+
+  /* ---------- sections ---------- */
+  section{margin-top:44px}
+  .sec-head{display:flex; align-items:baseline; gap:14px; margin-bottom:18px}
+  .sec-num{font-family:var(--mono); font-size:12px; color:var(--debit); letter-spacing:.1em}
+  h2{font-family:var(--display); font-weight:600; letter-spacing:-.01em; font-size:clamp(19px,2.4vw,25px); margin:0}
+  .sec-sub{font-size:13px; color:var(--muted); margin-left:auto; text-align:right; max-width:46ch}
+
+  /* ---------- gradient legend bar ---------- */
+  .gradbar{height:30px; border-radius:8px; margin-bottom:20px; position:relative;
+    background:linear-gradient(90deg, var(--debit-soft), transparent 42%, transparent 58%, var(--credit-soft));
+    border:1px solid var(--line-soft); display:flex; align-items:center; justify-content:space-between;
+    padding:0 14px; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase}
+  .gradbar .l{color:var(--debit)} .gradbar .m{color:var(--faint)} .gradbar .r{color:var(--credit)}
+
+  /* ---------- matrix ---------- */
+  .dir-row{display:grid; grid-template-columns:128px 1fr; gap:14px; margin-bottom:14px;
+    transition:opacity .2s, filter .2s}
+  .dir-row.dim{opacity:.28; filter:saturate(.4)}
+  .dir-rail{border-left:3px solid var(--rail); padding:6px 0 6px 14px; align-self:start; position:sticky; top:12px}
+  .dir-row[data-dir="BEARISH"]{--rail:var(--bear)}
+  .dir-row[data-dir="NEUTRAL"]{--rail:var(--neutral)}
+  .dir-row[data-dir="BULLISH"]{--rail:var(--bull)}
+  .dir-name{font-family:var(--display); font-weight:600; font-size:18px; color:var(--rail); display:block}
+  .dir-sub{font-size:11px; color:var(--faint); margin-top:3px; display:block; line-height:1.4}
+  .vol-cells{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+  .cell{background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--r);
+    padding:12px; transition:opacity .2s, filter .2s}
+  .cell.dim{opacity:.26; filter:saturate(.3)}
+  .cell-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:11px; gap:8px}
+  .vol-name{font-family:var(--display); font-weight:600; font-size:13.5px; letter-spacing:.02em}
+  .side-tag{font-size:10px; letter-spacing:.1em; text-transform:uppercase; padding:3px 8px; border-radius:6px}
+  .side-tag.buy{color:var(--debit); background:var(--debit-soft)}
+  .side-tag.sell{color:var(--credit); background:var(--credit-soft)}
+  .side-tag.mix{color:var(--muted); background:var(--raise)}
+
+  .chip{display:flex; align-items:center; gap:10px; padding:7px 8px; border-radius:9px; cursor:pointer;
+    border:1px solid transparent; transition:.15s; margin-bottom:5px; position:relative}
+  .chip:hover{background:var(--raise); border-color:var(--line)}
+  .chip:focus-visible{outline:2px solid var(--debit); outline-offset:1px}
+  .chip.primary{background:var(--raise)}
+  .chip .glyph{width:54px; height:30px; flex:none; border-radius:6px; background:rgba(255,255,255,.015);
+    border:1px solid var(--line-soft); display:flex; align-items:center; justify-content:center; overflow:hidden}
+  .chip .glyph svg{width:50px; height:26px}
+  .chip .cn{font-family:var(--display); font-size:13px; font-weight:500; line-height:1.15; flex:1}
+  .chip .sp{font-family:var(--mono); font-size:9.5px; font-weight:600; width:16px; height:16px; flex:none;
+    border-radius:5px; display:flex; align-items:center; justify-content:center}
+  .chip .sp.D{color:var(--debit); background:var(--debit-soft)}
+  .chip .sp.C{color:var(--credit); background:var(--credit-soft)}
+  .chip .smsf-x{display:none; position:absolute; right:8px; top:50%; transform:translateY(-50%);
+    font-family:var(--mono); font-size:9px; color:var(--neg); letter-spacing:.06em}
+  body.smsf .chip[data-multi="1"]{opacity:.4}
+  body.smsf .chip[data-multi="1"] .cn{text-decoration:line-through; text-decoration-color:var(--neg)}
+  body.smsf .chip[data-multi="1"] .smsf-x{display:block}
+  .flash{animation:flash 1.1s ease}
+  @keyframes flash{0%{box-shadow:0 0 0 0 var(--debit)} 30%{box-shadow:0 0 0 2px var(--debit), 0 0 22px var(--debit-soft)} 100%{box-shadow:0 0 0 0 transparent}}
+
+  /* ---------- switch / drivers ---------- */
+  .drivers{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+  .drv{background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--r); padding:16px;
+    border-top:2px solid var(--dt)}
+  .drv.cheap{--dt:var(--debit)} .drv.fair{--dt:var(--faint)} .drv.rich{--dt:var(--credit)}
+  .drv h3{font-family:var(--display); font-size:15px; margin:0 0 3px; display:flex; align-items:center; gap:8px}
+  .drv .lean{font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--dt); margin-bottom:12px}
+  .drv ul{list-style:none; margin:0; padding:0}
+  .drv li{font-size:13px; color:var(--muted); padding:5px 0; border-top:1px dashed var(--line-soft); display:flex; gap:8px}
+  .drv li:first-child{border-top:none}
+  .drv li b{color:var(--txt); font-weight:600; font-family:var(--mono)}
+
+  /* ---------- library ---------- */
+  .lib{display:grid; grid-template-columns:repeat(auto-fill,minmax(208px,1fr)); gap:14px}
+  .card{background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--r); padding:14px;
+    transition:.16s; scroll-margin-top:20px}
+  .card:hover{border-color:var(--line); transform:translateY(-2px)}
+  .card[data-side="D"]{border-top:2px solid var(--debit)}
+  .card[data-side="C"]{border-top:2px solid var(--credit)}
+  body.smsf .card[data-multi="1"]{opacity:.45}
+  .card-po{height:74px; border-radius:8px; background:rgba(255,255,255,.012); border:1px solid var(--line-soft);
+    margin-bottom:11px; overflow:hidden; display:flex; align-items:center; justify-content:center}
+  .card-po svg{width:100%; height:66px}
+  .card-top{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:3px}
+  .card h3{font-family:var(--display); font-size:14.5px; font-weight:600; margin:0; line-height:1.15}
+  .sp2{font-family:var(--mono); font-size:9.5px; font-weight:600; padding:3px 7px; border-radius:6px; flex:none}
+  .sp2.D{color:var(--debit); background:var(--debit-soft)} .sp2.C{color:var(--credit); background:var(--credit-soft)}
+  .card-desc{font-size:11.5px; color:var(--faint); min-height:30px; margin-bottom:10px; line-height:1.4}
+  .greeks{display:grid; grid-template-columns:repeat(4,1fr); gap:5px}
+  .gk{border-radius:6px; padding:5px 0; text-align:center; font-family:var(--mono); border:1px solid transparent}
+  .gk .gl{font-size:9px; letter-spacing:.08em; opacity:.7; display:block; text-transform:uppercase}
+  .gk .gv{font-size:13px; font-weight:600; display:block; line-height:1.2}
+  .gk.pos{background:rgba(52,214,160,.1); color:var(--pos); border-color:rgba(52,214,160,.22)}
+  .gk.neg{background:rgba(251,116,136,.1); color:var(--neg); border-color:rgba(251,116,136,.22)}
+  .gk.zero{background:var(--raise); color:var(--zero)}
+  .badges{display:flex; gap:6px; margin-top:9px; flex-wrap:wrap; min-height:18px}
+  .badge{font-size:9.5px; letter-spacing:.05em; padding:2px 7px; border-radius:5px; color:var(--muted); background:var(--raise)}
+  .badge.multi{color:var(--credit); background:var(--credit-soft)}
+
+  /* ---------- conflict ---------- */
+  .conf{display:flex; flex-direction:column; gap:9px}
+  .crow{display:grid; grid-template-columns:1.4fr auto 0.8fr auto 1.5fr; align-items:center; gap:12px;
+    background:var(--panel); border:1px solid var(--line-soft); border-radius:10px; padding:12px 15px}
+  .crow .when{font-size:13px; color:var(--txt)}
+  .crow .arr{color:var(--faint); font-family:var(--mono); font-size:15px}
+  .crow .need{font-family:var(--mono); font-size:12.5px; font-weight:600; padding:4px 9px; border-radius:6px;
+    background:var(--raise); text-align:center; white-space:nowrap}
+  .crow .need.pos{color:var(--pos)} .crow .need.neg{color:var(--neg)} .crow .need.flat{color:var(--muted)}
+  .crow .fix{font-size:12.5px; color:var(--muted)}
+  .crow .fix b{color:var(--txt); font-weight:600}
+
+  footer{margin-top:50px; padding-top:20px; border-top:1px solid var(--line-soft); color:var(--faint); font-size:12px}
+  footer code{color:var(--muted); background:var(--raise); padding:1px 6px; border-radius:4px}
+  .po-zero{stroke:var(--line); stroke-width:1; stroke-dasharray:2 3}
+
+  @media (max-width:840px){
+    .dir-row{grid-template-columns:1fr} .dir-rail{position:static; border-left:none; border-top:3px solid var(--rail);
+      padding:8px 0 0; display:flex; align-items:baseline; gap:10px}
+    .dir-sub{margin-top:0}
+    .vol-cells{grid-template-columns:1fr}
+    .drivers{grid-template-columns:1fr}
+    .crow{grid-template-columns:1fr; gap:7px} .crow .arr{display:none}
+    .key{margin-left:0; width:100%}
+    .sec-sub{display:none}
+    .hero-curves{grid-template-columns:repeat(3,1fr)}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important; transition:none!important}
+    .draw{stroke-dashoffset:0!important}
+  }
+  .draw{stroke-dasharray:1; stroke-dashoffset:1; animation:draw .9s ease forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+
+  /* ===== tabs ===== */
+  .tabs{display:flex; gap:4px; margin-top:26px; border-bottom:1px solid var(--line-soft)}
+  .tab{font-family:var(--display); font-size:15px; font-weight:500; color:var(--muted); cursor:pointer;
+    background:none; border:none; padding:11px 16px; position:relative; transition:.15s}
+  .tab:hover{color:var(--txt)}
+  .tab[aria-selected="true"]{color:var(--txt)}
+  .tab[aria-selected="true"]::after{content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:2px;
+    background:var(--debit); border-radius:2px}
+  .tab:focus-visible{outline:2px solid var(--debit); outline-offset:2px; border-radius:6px}
+  .panel[hidden]{display:none}
+
+  /* ===== decision flow ===== */
+  .flow{max-width:760px; margin:0 auto; padding-top:6px}
+  .fnode{background:var(--panel); border:1px solid var(--line-soft); border-radius:var(--r); padding:16px 18px}
+  .fnode h3{font-family:var(--display); font-weight:600; font-size:16px; margin:0 0 8px; line-height:1.2}
+  .fstage{font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); display:block; margin-bottom:6px}
+  .fmono{font-family:var(--mono); font-size:12.5px; color:var(--muted)}
+  .fnote{font-size:12px; color:var(--faint); margin:9px 0 0}
+  .fsrc{font-family:var(--mono); font-size:11.5px; color:var(--debit); margin-top:10px}
+  .ftags{display:flex; flex-wrap:wrap; gap:6px}
+  .ftags span{font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--raise); padding:4px 9px; border-radius:6px}
+  .fsteps{margin:0; padding-left:18px; font-size:13px; color:var(--muted)}
+  .fsteps li{padding:2px 0}
+  .fsteps b{color:var(--txt)}
+  .fneed{color:var(--credit)!important; font-family:var(--mono); font-weight:600}
+  .fout{display:flex; gap:7px; margin-top:11px; flex-wrap:wrap}
+  .fout b{font-family:var(--mono); font-size:11.5px; font-weight:600; padding:4px 10px; border-radius:6px; background:var(--raise)}
+  .fout b.bear{color:var(--bear)} .fout b.neut{color:var(--neutral)} .fout b.bull{color:var(--bull)}
+  .fout b.d{color:var(--debit); background:var(--debit-soft)} .cheap{color:var(--debit); font-weight:600}
+  .fout b.m{color:var(--muted)} .fout b.c{color:var(--credit); background:var(--credit-soft)}
+  .fnode.data{border-top:2px solid var(--debit)}
+  .fnode.cell{border-top:2px solid var(--neutral)}
+  .fnode.terminal.ok{border-top:2px solid var(--pos)}
+  .fnode.terminal.act{border-top:2px solid var(--credit)}
+  .fsplit{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .vconn{width:2px; height:30px; background:var(--line); margin:0 auto; position:relative}
+  .vconn::after{content:""; position:absolute; bottom:-1px; left:50%; transform:translateX(-50%);
+    border-left:5px solid transparent; border-right:5px solid transparent; border-top:7px solid var(--line)}
+  .vconn.short{height:18px}
+  .decision{max-width:500px; margin:0 auto; text-align:center; font-family:var(--display); font-weight:600;
+    font-size:15px; color:var(--txt); background:var(--panel2); border:1px solid var(--credit-dim);
+    border-radius:999px; padding:13px 26px}
+  .deyebrow{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--credit); margin-bottom:4px; font-weight:600}
+  .fork{position:relative; display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:48px}
+  .fk-stem{position:absolute; top:-48px; left:50%; width:2px; height:24px; background:var(--line); transform:translateX(-1px)}
+  .fk-bus{position:absolute; top:-24px; left:25%; right:25%; height:2px; background:var(--line)}
+  .fk-drop{position:absolute; top:-24px; width:2px; height:24px; background:var(--line)}
+  .fk-drop.left{left:25%} .fk-drop.right{left:75%}
+  .fk-drop::after{content:""; position:absolute; bottom:-1px; left:50%; transform:translateX(-50%);
+    border-left:5px solid transparent; border-right:5px solid transparent; border-top:7px solid var(--line)}
+  .branch{display:flex; flex-direction:column; align-items:stretch}
+  .blabel{align-self:center; font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.1em;
+    padding:3px 13px; border-radius:999px; margin-bottom:12px}
+  .blabel.no{color:var(--pos); background:rgba(52,214,160,.1); border:1px solid rgba(52,214,160,.25)}
+  .blabel.yes{color:var(--credit); background:var(--credit-soft); border:1px solid var(--credit-dim)}
+  .gmini{display:flex; gap:6px}
+  .gmini span{font-family:var(--mono); font-size:13px; font-weight:600; width:30px; height:28px; display:flex;
+    align-items:center; justify-content:center; border-radius:6px; background:var(--raise); color:var(--muted)}
+  .minigrid{display:grid; grid-template-columns:auto 1fr 1fr 1fr; gap:6px; margin:6px 0 2px}
+  .minigrid .mh{font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; text-align:center; padding:4px 0; align-self:center}
+  .minigrid .mh.d{color:var(--debit)} .minigrid .mh.m{color:var(--faint)} .minigrid .mh.c{color:var(--credit)}
+  .minigrid .mr{font-family:var(--mono); font-size:10px; letter-spacing:.06em; text-transform:uppercase; align-self:center; padding-right:6px}
+  .minigrid .mr.bear{color:var(--bear)} .minigrid .mr.neut{color:var(--neutral)} .minigrid .mr.bull{color:var(--bull)}
+  .minigrid .mc{font-family:var(--display); font-size:11px; line-height:1.15; padding:8px; border-radius:7px;
+    background:var(--raise); border:1px solid var(--line-soft); cursor:pointer; transition:.14s; min-height:42px; display:flex; align-items:center; gap:3px}
+  .minigrid .mc:hover{border-color:var(--faint); transform:translateY(-1px)}
+  .minigrid .mc.vcheap{background:var(--debit-soft)} .minigrid .mc.vrich{background:var(--credit-soft)}
+  .minigrid .mc .sd{font-family:var(--mono); font-size:8px; opacity:.65}
+  @media (max-width:760px){
+    .fsplit{grid-template-columns:1fr}
+    .fork{grid-template-columns:1fr; gap:14px; margin-top:20px}
+    .fk-stem,.fk-bus,.fk-drop{display:none}
+    .minigrid .mc{font-size:10px; padding:6px 5px; min-height:38px}
+    .decision{font-size:14px; padding:12px 18px}
+    .tab{font-size:14px; padding:10px 12px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="mast">
+    <div class="eyebrow">Sentinel · Position Adjustment Reference</div>
+    <h1>The Adjustment <span class="b">Matrix</span></h1>
+    <p class="thesis"><strong>Direction</strong> picks the side of the book. <strong>Vol-state</strong> picks <span style="color:var(--debit)">debit</span> vs <span style="color:var(--credit)">credit</span>. Your Greeks decide which cell you're actually forced into.</p>
+    <div class="hero-curves" id="heroCurves" aria-hidden="true"></div>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button class="tab" role="tab" id="tabMatrix" aria-selected="true" aria-controls="panel-matrix" data-tab="matrix">Matrix</button>
+    <button class="tab" role="tab" id="tabFlow" aria-selected="false" aria-controls="panel-flow" data-tab="flow">Decision&nbsp;Flow</button>
+  </div>
+
+  <div class="panel" id="panel-matrix" role="tabpanel" aria-labelledby="tabMatrix">
+
+  <div class="controls">
+    <div class="ctl-group">
+      <span class="ctl-label">Direction</span>
+      <div class="pills" id="dirFilter">
+        <button class="pill" data-f="ALL" aria-pressed="true">All</button>
+        <button class="pill bear" data-f="BEARISH" aria-pressed="false">Bearish</button>
+        <button class="pill neut" data-f="NEUTRAL" aria-pressed="false">Neutral</button>
+        <button class="pill bull" data-f="BULLISH" aria-pressed="false">Bullish</button>
+      </div>
+    </div>
+    <div class="ctl-group">
+      <span class="ctl-label">Vol</span>
+      <div class="pills" id="volFilter">
+        <button class="pill" data-f="ALL" aria-pressed="true">All</button>
+        <button class="pill" data-f="CHEAP" aria-pressed="false">Cheap</button>
+        <button class="pill" data-f="FAIR" aria-pressed="false">Fair</button>
+        <button class="pill" data-f="RICH" aria-pressed="false">Rich</button>
+      </div>
+    </div>
+    <button class="switch" id="smsfToggle" aria-pressed="false" title="Grey out multi-expiry combos blocked in the SMSF on EU cash-settled index (SPX/RUT/NDX/XSP)">
+      <span class="track"></span><span class="t">SMSF lens</span>
+    </button>
+    <div class="key">
+      <span><i class="dot d"></i>Debit · buy</span>
+      <span><i class="dot c"></i>Credit · sell</span>
+      <span><i class="dot p"></i>+ Greek</span>
+      <span><i class="dot n"></i>− Greek</span>
+    </div>
+  </div>
+
+  <!-- MATRIX -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <h2>Where the book should go</h2>
+      <p class="sec-sub">Read the row your tape is in, then the column your vol is in. The cell is the ranked structure menu.</p>
+    </div>
+    <div class="gradbar"><span class="l">◀ Cheap · buy premium</span><span class="m">Fair</span><span class="r">Rich · sell premium ▶</span></div>
+    <div id="matrix"></div>
+  </section>
+
+  <!-- SWITCH -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <h2>The debit ⇄ credit switch</h2>
+      <p class="sec-sub">What flips a cell between buying and selling premium — independent of direction.</p>
+    </div>
+    <div class="drivers">
+      <div class="drv cheap">
+        <h3>Cheap</h3><div class="lean">buy premium · debit</div>
+        <ul>
+          <li><b>IVR</b> &lt; 25</li>
+          <li><b>VRP</b> ≤ 0 — selling unpaid</li>
+          <li><b>Term</b> backwardation / inverted front</li>
+          <li><b>RV</b> rising — own gamma/vega</li>
+        </ul>
+      </div>
+      <div class="drv fair">
+        <h3>Fair</h3><div class="lean">mixed</div>
+        <ul>
+          <li><b>IVR</b> 25–60</li>
+          <li><b>VRP</b> ≈ 0</li>
+          <li>Direction decides; cost breaks ties</li>
+        </ul>
+      </div>
+      <div class="drv rich">
+        <h3>Rich</h3><div class="lean">sell premium · credit</div>
+        <ul>
+          <li><b>IVR</b> ≥ 60</li>
+          <li><b>VRP</b> &gt; 0 — paid to sell</li>
+          <li><b>Term</b> contango</li>
+          <li><b>RV</b> falling — vol-crush pays</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <h2>Structure library</h2>
+      <p class="sec-sub">Each silhouette is the at-expiry P&amp;L. The Greek row is the net signature the conflict engine selects on.</p>
+    </div>
+    <div class="lib" id="library"></div>
+  </section>
+
+  <!-- CONFLICT -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h2>When your Greeks fight the regime</h2>
+      <p class="sec-sub">The book's net Greek vs the regime's prescribed posture → the structure that closes the gap.</p>
+    </div>
+    <div class="conf" id="conflicts"></div>
+  </section>
+
+  </div><!-- /panel-matrix -->
+
+  <div class="panel" id="panel-flow" role="tabpanel" aria-labelledby="tabFlow" hidden>
+    <div class="sec-head" style="margin-top:38px">
+      <span class="sec-num">→</span>
+      <h2>How the engine decides</h2>
+      <p class="sec-sub">Inputs become a cell; your Greeks decide whether the cell holds or an adjustment fires.</p>
+    </div>
+
+    <div class="flow">
+      <div class="fnode data">
+        <span class="fstage">Inputs · no manual entry</span>
+        <h3>Market data</h3>
+        <div class="ftags"><span>price · OHLC</span><span>VIX · VVIX</span><span>term · skew</span><span>option chain</span></div>
+        <div class="fsrc">TWS → yfinance → Finnhub</div>
+      </div>
+      <div class="vconn"></div>
+
+      <div class="fsplit">
+        <div class="fnode">
+          <span class="fstage">Classify · direction</span>
+          <h3>Trend read</h3>
+          <p class="fmono">trend · ADX · bias</p>
+          <div class="fout"><b class="bear">Bearish</b><b class="neut">Neutral</b><b class="bull">Bullish</b></div>
+        </div>
+        <div class="fnode">
+          <span class="fstage">Classify · vol-state</span>
+          <h3>Vol read — the debit/credit switch</h3>
+          <ol class="fsteps">
+            <li>IVR bucket → cheap / fair / rich</li>
+            <li><span class="fmono">VRP ≤ 0</span> → nudge cheaper</li>
+            <li>backwardation → force <span class="cheap">Cheap</span></li>
+          </ol>
+          <div class="fout"><b class="d">Cheap</b><b class="m">Fair</b><b class="c">Rich</b></div>
+        </div>
+      </div>
+      <div class="vconn"></div>
+
+      <div class="fnode cell">
+        <span class="fstage">Locate</span>
+        <h3>Regime cell&nbsp;=&nbsp;direction&nbsp;×&nbsp;vol-state</h3>
+        <div class="minigrid" id="minigrid" title="Tap a cell to open the Matrix"></div>
+        <div class="fnote">each cell → its ranked structure menu (Matrix tab)</div>
+      </div>
+      <div class="vconn"></div>
+
+      <div class="fnode book">
+        <span class="fstage">Read book · per account</span>
+        <h3>Net Greeks vs budget</h3>
+        <div class="gmini"><span>Δ</span><span>Γ</span><span>V</span><span>Θ</span></div>
+        <p class="fnote">aggregated from TWS positions — portfolio level, not per trade</p>
+      </div>
+      <div class="vconn"></div>
+
+      <div class="decision"><span class="deyebrow">◇ Decision</span>Do the book's Greeks conflict with the regime?</div>
+
+      <div class="fork">
+        <span class="fk-stem"></span><span class="fk-bus"></span><span class="fk-drop left"></span><span class="fk-drop right"></span>
+        <div class="branch">
+          <span class="blabel no">No</span>
+          <div class="fnode terminal ok">
+            <h3>Aligned</h3>
+            <p class="fmono">Hold. The standing menu is the cell itself.</p>
+          </div>
+        </div>
+        <div class="branch">
+          <span class="blabel yes">Yes</span>
+          <div class="fnode fix">
+            <ol class="fsteps">
+              <li>which Greek is wrong → <b class="fneed">need ±Δ / ±V / ±Γ</b></li>
+              <li>structure whose signature supplies it</li>
+              <li>drop SMSF-blocked multi-expiry</li>
+            </ol>
+          </div>
+          <div class="vconn short"></div>
+          <div class="fnode terminal act">
+            <h3>Ranked adjustment</h3>
+            <p class="fmono">side (debit vs credit) set by vol-state</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div><!-- /panel-flow -->
+
+  <footer>
+    Generated from <code>sentinel.py</code> — matrix cells, Greek signatures, and switch logic are 1:1 with the engine. Silhouettes are representative at-expiry P&amp;L; confirm pricing on the live chain. <code>SMSF lens</code> greys multi-expiry combos blocked on EU cash-settled index (SPX/RUT/NDX/XSP); they remain valid on single names.
+  </footer>
+
+</div>
+
+<script>
+/* ---- data: 1:1 with sentinel.py ---- */
+const S = {
+  long_put:{side:'D',g:[-1,1,1,-1],multi:0,pos:0,label:'Long Put',po:[[0,85],[50,-15],[100,-15]],desc:'Outright bearish; +γ +vega into a falling, expanding tape'},
+  long_call:{side:'D',g:[1,1,1,-1],multi:0,pos:0,label:'Long Call',po:[[0,-15],[50,-15],[100,85]],desc:'Outright bullish; +γ +vega — the squeeze thesis'},
+  put_debit_spread:{side:'D',g:[-1,1,1,-1],multi:0,pos:0,label:'Put Debit Spread',po:[[0,60],[35,60],[55,-20],[100,-20]],desc:'Bearish, defined cost; cheaper than outright'},
+  call_debit_spread:{side:'D',g:[1,1,1,-1],multi:0,pos:0,label:'Call Debit Spread',po:[[0,-20],[45,-20],[65,60],[100,60]],desc:'Bullish, defined cost; capped upside'},
+  call_credit_spread:{side:'C',g:[-1,-1,-1,1],multi:0,pos:0,label:'Call Credit Spread',po:[[0,25],[45,25],[65,-45],[100,-45]],desc:'Bearish; sell elevated call IV, defined risk'},
+  put_credit_spread:{side:'C',g:[1,-1,-1,1],multi:0,pos:0,label:'Put Credit Spread',po:[[0,-45],[35,-45],[55,25],[100,25]],desc:'Bullish; sell elevated put IV, defined risk'},
+  put_ratio:{side:'C',g:[-1,-1,-1,1],multi:0,pos:1,label:'Put Ratio',po:[[0,-65],[30,45],[50,10],[100,10]],desc:'Short-heavy, bearish, short vega; tail risk below'},
+  call_ratio:{side:'C',g:[1,-1,-1,1],multi:0,pos:1,label:'Call Ratio',po:[[0,10],[50,10],[70,45],[100,-65]],desc:'Short-heavy, bullish-capped; tail risk above'},
+  iron_condor:{side:'C',g:[0,-1,-1,1],multi:0,pos:0,label:'Iron Condor',po:[[0,-40],[20,-40],[35,30],[65,30],[80,-40],[100,-40]],desc:'Delta-neutral harvest; +theta, −vega'},
+  iron_fly:{side:'C',g:[0,-1,-1,1],multi:0,pos:1,label:'Iron Fly',po:[[0,-40],[35,-40],[50,45],[65,-40],[100,-40]],desc:'Neutral, strong +theta; tighter body to pin'},
+  short_strangle:{side:'C',g:[0,-1,-1,1],multi:0,pos:0,label:'Short Strangle',po:[[0,-70],[25,25],[75,25],[100,-70]],desc:'Neutral, max +theta; undefined — margin/mandate only'},
+  butterfly:{side:'D',g:[0,0,-1,1],multi:0,pos:1,label:'Butterfly',po:[[0,-10],[35,-10],[50,70],[65,-10],[100,-10]],desc:'Neutral pin, cheap defined risk if a level holds'},
+  put_fly:{side:'D',g:[-1,0,-1,1],multi:0,pos:1,label:'Put Fly',po:[[0,-10],[20,-10],[35,70],[50,-10],[100,-10]],desc:'Bearish to a target — a downside magnet in view'},
+  call_bwb:{side:'C',g:[-1,0,-1,1],multi:0,pos:1,label:'OTM Call BWB',po:[[0,18],[48,18],[60,50],[72,-20],[100,-30]],desc:'Bearish, skew-financed — sell the rip, vol-crush pays'},
+  calendar:{side:'D',g:[0,-1,1,1],multi:1,pos:0,label:'Calendar',po:[[0,-22],[30,5],[50,52],[70,5],[100,-22]],desc:'Neutral; own cheap back vega + theta differential'},
+  double_calendar:{side:'D',g:[0,-1,1,1],multi:1,pos:0,label:'Double Calendar',po:[[0,-20],[22,42],[38,12],[50,8],[62,12],[78,42],[100,-20]],desc:'Neutral, wider tent — two feet for a wider range'},
+  diagonal:{side:'D',g:[0,-1,1,1],multi:1,pos:1,label:'Diagonal',po:[[0,-22],[35,10],[55,52],[75,8],[100,-15]],desc:'Directional lean + long vega'},
+  put_calendar:{side:'D',g:[-1,-1,1,1],multi:1,pos:1,label:'Put Calendar',po:[[0,-15],[30,52],[50,12],[100,-22]],desc:'Bearish lean, +vega — own the front if expansion expected'},
+  call_calendar:{side:'D',g:[1,-1,1,1],multi:1,pos:1,label:'Call Calendar',po:[[0,-22],[50,12],[70,52],[100,-15]],desc:'Bullish lean, +vega — own upside front vega'}
+};
+
+const MATRIX = {
+  BEARISH:{sub:'price ↓ · ADX &gt; 25', CHEAP:['long_put','put_debit_spread','put_calendar','put_fly'], FAIR:['call_credit_spread','put_debit_spread'], RICH:['call_credit_spread','call_bwb','put_ratio']},
+  NEUTRAL:{sub:'range · ADX &lt; 20', CHEAP:['calendar','double_calendar','diagonal'], FAIR:['iron_condor','butterfly','calendar'], RICH:['iron_condor','iron_fly','short_strangle']},
+  BULLISH:{sub:'price ↑ · ADX &gt; 25', CHEAP:['call_debit_spread','long_call','call_calendar'], FAIR:['put_credit_spread','call_debit_spread'], RICH:['put_credit_spread','call_ratio']}
+};
+const SIDE_LEAN = {CHEAP:['buy','buy · debit'], FAIR:['mix','mixed'], RICH:['sell','sell · credit']};
+const LIB_ORDER = ['long_put','long_call','put_debit_spread','call_debit_spread','call_credit_spread','put_credit_spread','put_ratio','call_ratio','iron_condor','iron_fly','short_strangle','butterfly','put_fly','call_bwb','calendar','double_calendar','diagonal','put_calendar','call_calendar'];
+
+const CONFLICTS = [
+  {when:'Long delta into a BEARISH tape', need:'−delta', cls:'neg', fix:'add a short-delta structure from the bearish column'},
+  {when:'Short delta into a BULLISH tape', need:'+delta', cls:'pos', fix:'add a long-delta structure from the bullish column'},
+  {when:'Delta off-neutral in a RANGE', need:'flat δ', cls:'flat', fix:'recenter toward zero'},
+  {when:'Short vega into EXPANDING vol', need:'+vega', cls:'pos', fix:'add long vega — <b>shift credit → debit</b> (calendars, debit spreads)'},
+  {when:'Long vega into MEAN-REVERTING vol', need:'−vega', cls:'neg', fix:'trim vega / harvest (condors, flies)'},
+  {when:'Short gamma near expiry / rising RV', need:'+gamma', cls:'pos', fix:'<b>roll fronts out · close near-expiry · widen</b>, or buy gamma'},
+  {when:'Negative theta in a harvest regime', need:'+theta', cls:'pos', fix:'restructure toward +theta (condor / fly)'}
+];
+
+/* ---- payoff renderer ---- */
+const GLAB=['Δ','Γ','V','Θ'];
+function payoff(pts, side, {draw=false, sw=2.4}={}){
+  const w=140,h=72,px=8,pt=9,pb=9;
+  const X=x=>px+(x/100)*(w-2*px), Y=y=>{const t=(y+100)/200; return (h-pb)-t*(h-pt-pb);};
+  const z=Y(0);
+  const line=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join(' ');
+  const area='M '+X(pts[0][0]).toFixed(1)+' '+z.toFixed(1)+' '+pts.map(p=>'L '+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join(' ')+' L '+X(pts[pts.length-1][0]).toFixed(1)+' '+z.toFixed(1)+' Z';
+  const col=side==='D'?'var(--debit)':'var(--credit)', fl=side==='D'?'var(--debit-soft)':'var(--credit-soft)';
+  return `<svg viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <path d="${area}" fill="${fl}"/>
+    <line x1="${px}" y1="${z.toFixed(1)}" x2="${(w-px).toFixed(1)}" y2="${z.toFixed(1)}" class="po-zero"/>
+    <path d="${line}" fill="none" stroke="${col}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round" pathLength="1" class="${draw?'draw':''}"/>
+  </svg>`;
+}
+function greekCells(g){
+  return g.map((v,i)=>{
+    const c=v>0?'pos':v<0?'neg':'zero', s=v>0?'+':v<0?'−':'0';
+    return `<div class="gk ${c}"><span class="gl">${GLAB[i]}</span><span class="gv">${s}</span></div>`;
+  }).join('');
+}
+
+/* ---- build matrix ---- */
+const mx=document.getElementById('matrix');
+['BEARISH','NEUTRAL','BULLISH'].forEach(dir=>{
+  const row=document.createElement('div'); row.className='dir-row'; row.dataset.dir=dir;
+  let cells='';
+  ['CHEAP','FAIR','RICH'].forEach(vol=>{
+    const lean=SIDE_LEAN[vol];
+    let chips='';
+    MATRIX[dir][vol].forEach((k,i)=>{
+      const d=S[k];
+      chips+=`<div class="chip ${i===0?'primary':''}" data-struct="${k}" data-multi="${d.multi}" tabindex="0" role="button">
+        <span class="glyph">${payoff(d.po,d.side,{sw:3.4})}</span>
+        <span class="cn">${d.label}</span>
+        <span class="sp ${d.side}">${d.side}</span>
+        <span class="smsf-x">✕ SMSF</span></div>`;
+    });
+    cells+=`<div class="cell" data-vol="${vol}">
+      <div class="cell-head"><span class="vol-name">${vol[0]+vol.slice(1).toLowerCase()}</span>
+      <span class="side-tag ${lean[0]}">${lean[1]}</span></div>${chips}</div>`;
+  });
+  row.innerHTML=`<div class="dir-rail"><span class="dir-name">${dir[0]+dir.slice(1).toLowerCase()}</span>
+    <span class="dir-sub">${MATRIX[dir].sub}</span></div><div class="vol-cells">${cells}</div>`;
+  mx.appendChild(row);
+});
+
+/* ---- build library ---- */
+const lib=document.getElementById('library');
+LIB_ORDER.forEach(k=>{
+  const d=S[k]; const card=document.createElement('div');
+  card.className='card'; card.id='s-'+k; card.dataset.side=d.side; card.dataset.multi=d.multi;
+  const badges=(d.multi?'<span class="badge multi">⧗ multi-expiry</span>':'')+(d.pos?'<span class="badge">~ strike-dependent</span>':'');
+  card.innerHTML=`<div class="card-po">${payoff(d.po,d.side,{draw:true})}</div>
+    <div class="card-top"><h3>${d.label}</h3><span class="sp2 ${d.side}">${d.side==='D'?'DEBIT':'CREDIT'}</span></div>
+    <div class="card-desc">${d.desc}</div>
+    <div class="greeks">${greekCells(d.g)}</div>
+    <div class="badges">${badges}</div>`;
+  lib.appendChild(card);
+});
+
+/* ---- hero curves ---- */
+const hero=document.getElementById('heroCurves');
+['long_put','call_credit_spread','iron_condor','calendar','put_fly','call_debit_spread'].forEach((k,i)=>{
+  const d=S[k]; const el=document.createElement('div'); el.className='hc';
+  el.innerHTML=payoff(d.po,d.side,{draw:true,sw:2});
+  const p=el.querySelector('.draw'); if(p) p.style.animationDelay=(i*0.12)+'s';
+  hero.appendChild(el);
+});
+
+/* ---- conflicts ---- */
+const cf=document.getElementById('conflicts');
+CONFLICTS.forEach(c=>{
+  const r=document.createElement('div'); r.className='crow';
+  r.innerHTML=`<span class="when">${c.when}</span><span class="arr">→</span>
+    <span class="need ${c.cls}">${c.need}</span><span class="arr">→</span><span class="fix">${c.fix}</span>`;
+  cf.appendChild(r);
+});
+
+/* ---- interactions ---- */
+document.getElementById('smsfToggle').addEventListener('click',function(){
+  const on=this.getAttribute('aria-pressed')==='true'; this.setAttribute('aria-pressed',!on);
+  document.body.classList.toggle('smsf',!on);
+});
+function bindFilter(id, dimSelector, attr){
+  const grp=document.getElementById(id);
+  grp.addEventListener('click',e=>{
+    const b=e.target.closest('.pill'); if(!b) return;
+    [...grp.children].forEach(x=>x.setAttribute('aria-pressed','false'));
+    b.setAttribute('aria-pressed','true');
+    const f=b.dataset.f;
+    document.querySelectorAll(dimSelector).forEach(el=>{
+      el.classList.toggle('dim', f!=='ALL' && el.dataset[attr]!==f);
+    });
+  });
+}
+bindFilter('dirFilter','.dir-row','dir');
+bindFilter('volFilter','.cell','vol');
+
+document.getElementById('matrix').addEventListener('click',e=>{
+  const chip=e.target.closest('.chip'); if(!chip) return;
+  const card=document.getElementById('s-'+chip.dataset.struct);
+  if(card){ card.scrollIntoView({behavior:'smooth',block:'center'});
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash'); }
+});
+document.getElementById('matrix').addEventListener('keydown',e=>{
+  if((e.key==='Enter'||e.key===' ')&&e.target.classList.contains('chip')){e.preventDefault(); e.target.click();}
+});
+
+/* ---- tabs ---- */
+const tabs=document.querySelectorAll('.tab');
+const panels={matrix:document.getElementById('panel-matrix'),flow:document.getElementById('panel-flow')};
+function activate(name){
+  tabs.forEach(t=>t.setAttribute('aria-selected', String(t.dataset.tab===name)));
+  Object.entries(panels).forEach(([k,p])=>{ if(p) p.hidden = (k!==name); });
+}
+tabs.forEach(t=>t.addEventListener('click',()=>activate(t.dataset.tab)));
+
+/* ---- mini-grid map (locate stage) ---- */
+const mg=document.getElementById('minigrid');
+if(mg){
+  const rcls={BEARISH:'bear',NEUTRAL:'neut',BULLISH:'bull'};
+  mg.innerHTML='<span></span><span class="mh d">Cheap</span><span class="mh m">Fair</span><span class="mh c">Rich</span>';
+  ['BEARISH','NEUTRAL','BULLISH'].forEach(dir=>{
+    mg.insertAdjacentHTML('beforeend',`<span class="mr ${rcls[dir]}">${dir.slice(0,4)}</span>`);
+    ['CHEAP','FAIR','RICH'].forEach(vol=>{
+      const k=MATRIX[dir][vol][0], d=S[k];
+      const vc=vol==='CHEAP'?'vcheap':vol==='RICH'?'vrich':'';
+      mg.insertAdjacentHTML('beforeend',`<div class="mc ${vc}" data-struct="${k}">${d.label}<span class="sd">${d.side}</span></div>`);
+    });
+  });
+  mg.addEventListener('click',e=>{
+    const c=e.target.closest('.mc'); if(!c) return;
+    activate('matrix');
+    const card=document.getElementById('s-'+c.dataset.struct);
+    if(card) setTimeout(()=>{card.scrollIntoView({behavior:'smooth',block:'center'});
+      card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');},70);
+  });
+}
+</script>
+</body>
+</html>

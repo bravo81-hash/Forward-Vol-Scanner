@@ -53,7 +53,12 @@ padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:
  <button id="scan">Scan</button>
  <button id="sentinel" title="Portfolio adjustment advisor — per-account guidance">Sentinel</button>
  <button id="direction" title="Objective structure selection — delta vs vol play, then the ranked structure for your intent">Direction</button>
+ <button id="smsf" title="SMSF cash account — single-expiry structure selection (Gate S): IV band × 25Δ skew × bias, with full build specs">SMSF</button>
  <span id="status">idle</span>
+ <span style="margin-left:auto;font-family:var(--mono);font-size:11px">
+  <a href="/static/smsf_playbook.html" target="_blank" style="color:var(--mut)">SMSF Guide</a> ·
+  <a href="/static/te_playbook.html" target="_blank" style="color:var(--mut)">TE Playbook</a> ·
+  <a href="/static/sentinel_matrix.html" target="_blank" style="color:var(--mut)">Adj Matrix</a></span>
 </header>
 <div id="out"></div>
 <div class="toast" id="toast"></div>
@@ -75,7 +80,70 @@ $("modes").onclick=e=>{const b=e.target.closest("button");if(!b)return;MODE=b.da
 $("scan").onclick=()=>{VIEW="scan";scan();};
 $("sentinel").onclick=()=>{VIEW="sentinel";sentinel();};
 $("direction").onclick=()=>{VIEW="direction";direction(false);};
-function refresh(){return VIEW==="sentinel"?sentinel():VIEW==="direction"?direction(false):scan();}
+$("smsf").onclick=()=>{VIEW="smsf";smsf(false);};
+function refresh(){return VIEW==="sentinel"?sentinel():VIEW==="direction"?direction(false):VIEW==="smsf"?smsf(false):scan();}
+// --------------------------------------------------------------- SMSF view --
+let SINTENT="auto",SMODE="auto",SLAST=null,SSYM="SPX";
+function sctl(){
+ return `<div class="ctxrow" style="align-items:center">
+  <span class="tabs" id="ssym">${["SPX","RUT"].map(x=>`<button data-s="${x}" class="${x===SSYM?'on':''}">${x}</button>`).join("")}</span>
+  <span class="tabs" id="sintent">${["auto","bull","neutral","bear"].map(x=>`<button data-i="${x}" class="${x===SINTENT?'on':''}">${x==="auto"?"Auto":x==="bull"?"Bull Δ":x==="bear"?"Bear Δ":"Neutral"}</button>`).join("")}</span>
+  <span class="modes" id="smode">${["auto","live","yf","mock"].map(x=>`<button data-m="${x}" class="${x===SMODE?'on':''}">${x}</button>`).join("")}</span>
+  <button id="sgo">Go</button>
+  <a href="/static/smsf_playbook.html" target="_blank" style="color:var(--jade);font-family:var(--mono);font-size:11px">build guide ↗</a></div>
+  <div class="bookbar">GATE S — cash-account single-expiry selector: IV band × 25Δ skew × term × bias. All variants one expiry; adjustments debit-side only. Advisory, never a block.</div>
+  <div id="sres"></div>`;
+}
+function smsf(run){
+ $("out").innerHTML=sctl();
+ $("ssym").onclick=e=>{const b=e.target.closest("button");if(!b)return;SSYM=b.dataset.s;
+  document.querySelectorAll("#ssym button").forEach(x=>x.classList.toggle("on",x.dataset.s===SSYM));};
+ $("sintent").onclick=e=>{const b=e.target.closest("button");if(!b)return;SINTENT=b.dataset.i;
+  document.querySelectorAll("#sintent button").forEach(x=>x.classList.toggle("on",x.dataset.i===SINTENT));};
+ $("smode").onclick=e=>{const b=e.target.closest("button");if(!b)return;SMODE=b.dataset.m;
+  document.querySelectorAll("#smode button").forEach(x=>x.classList.toggle("on",x.dataset.m===SMODE));};
+ $("sgo").onclick=sfetch;
+ if(SLAST)renderSmsf(SLAST);
+ if(run)sfetch();
+}
+async function sfetch(){
+ $("status").textContent=`smsf ${SSYM} ${SINTENT} (${SMODE})…`;
+ try{
+  const r=await fetch(`/api/smsf?symbol=${SSYM}&intent=${SINTENT}&mode=${SMODE}`);
+  const d=await r.json();if(d.error)throw new Error(d.error);
+  SLAST=d;renderSmsf(d);
+  $("status").textContent=`${SSYM} · ${d.mode} · ${new Date().toLocaleTimeString()}`;
+ }catch(e){$("status").textContent="error";toast("SMSF failed: "+e.message);}
+}
+function renderSmsf(d){
+ const inp=d.inputs;
+ const acls=/STAND ASIDE/.test(d.action)?"warn":/DE-GROSS/.test(d.action)?"stop":"go";
+ let h=`<div class="verdict ${acls}">${d.action}</div>`;
+ h+=`<div class="bookbar">Gate S · bias: ${d.bias>0?"bull":d.bias<0?"bear":"neutral"} · intent: ${d.intent}</div>`;
+ h+=`<div class="ctxrow">
+  <span class="chip">IV30 <b>${inp.iv30}</b> band <b>${inp.iv_band}</b> (${inp.iv_band_src})</span>
+  <span class="chip">rr25 <b>${fmt(inp.rr25_30d,1)}v</b> skew <b>${inp.skew_rich?"RICH":"norm"}</b></span>
+  <span class="chip">VRP fwd <b>${fmt(inp.vrp_fwd,1)}v</b> HAR ${inp.har_rv}</span>
+  <span class="chip">term <b>${inp.term||"—"}</b></span>
+  <span class="chip">regime bias <b>${fmt(inp.regime_bias,0)}</b> trend <b>${inp.trend}</b></span>
+  <span class="chip">spot <b>${inp.spot}</b></span></div>`;
+ if(d.structures.length){
+  h+=`<div class="cards">`+d.structures.map(s=>{
+   const b=s.build;
+   return `<div class="card"><div class="fam">#${s.rank}</div><h3>${s.label}</h3>
+    <ul class="why"><li>${s.why}</li></ul>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--mut);border-top:1px solid var(--line);padding-top:6px">
+     <div><b style="color:var(--jade)">DTE</b> ${b.dte}</div>
+     <div><b style="color:var(--jade)">BODY</b> ${b.body}</div>
+     <div><b style="color:var(--jade)">WINGS</b> ${b.wings}</div>
+     <div><b style="color:var(--amber)">CASH</b> ${b.cash}</div>
+     <div><b style="color:var(--amber)">MANAGE</b> ${b.manage}</div>
+    </div></div>`;}).join("")+`</div>`;
+ }
+ if(d.notes.length)h+=`<div class="warnbox">${d.notes.map(n=>"⚠ "+n).join("<br>")}</div>`;
+ h+=`<div class="bookbar">${d.data.note||""}${d.fallback_chain?` · fallbacks tried: ${d.fallback_chain.join(" | ")}`:""}</div>`;
+ $("sres").innerHTML=h;
+}
 // ---------------------------------------------------------- Direction view --
 let DINTENT="auto",DMODE="auto",DLAST=null;
 function dctl(){

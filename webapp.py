@@ -115,6 +115,56 @@ def api_direction():
     return jsonify(out)
 
 
+@app.get("/api/smsf")
+def api_smsf():
+    """SMSF tab: single-expiry structure selection for the cash account.
+
+    symbol: SPX / RUT (any SURFACE_CFG symbol accepted; index advisory)
+    intent: auto | bull | neutral | bear   (auto = regime bias decides)
+    mode:   auto | live | yf | mock
+    """
+    from core.chain import MOCK, SURFACE_CFG
+    from core.yf_client import build_context_yf
+    from selection.smsf import smsf_verdict
+
+    symbol = request.args.get("symbol", "SPX").upper().strip()
+    intent = request.args.get("intent", "auto").lower()
+    mode = request.args.get("mode", "auto").lower()
+    if intent not in ("auto", "bull", "neutral", "bear"):
+        return jsonify({"error": f"bad intent '{intent}'"}), 400
+
+    errors, ctx = [], None
+    order = {"live": ["live"], "yf": ["yf"], "mock": ["mock"],
+             "auto": (["live", "yf", "mock"] if symbol in SURFACE_CFG
+                      else ["yf"])}.get(mode)
+    if order is None:
+        return jsonify({"error": f"bad mode '{mode}'"}), 400
+    for m in order:
+        if m == "live" and symbol not in SURFACE_CFG:
+            errors.append("live: symbol not in SURFACE_CFG")
+            continue
+        if m == "mock" and symbol not in MOCK:
+            errors.append("mock: no synthetic surface for symbol")
+            continue
+        try:
+            ctx = (build_context_yf(symbol) if m == "yf"
+                   else build_context(symbol, m))
+            break
+        except Exception as e:                   # noqa: BLE001
+            errors.append(f"{m}: {e}")
+    if ctx is None:
+        return jsonify({"error": "; ".join(errors) or "no data source"}), 502
+
+    out = smsf_verdict(ctx, intent)
+    if errors:
+        out["fallback_chain"] = errors
+    log("smsf", symbol, {"intent": intent, "mode": ctx.mode,
+                         "bias": out["bias"],
+                         "top": (out["structures"][0]["key"]
+                                 if out["structures"] else None)})
+    return jsonify(out)
+
+
 @app.get("/api/suggest")
 def api_suggest():
     symbol = request.args.get("symbol", "SPX").upper()

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMSF Playbook — Single-Expiry Structure Guide</title>
+<style>
+:root{
+  --ink:#0E1116; --panel:#161B22; --panel2:#1C232C; --line:#2A3340;
+  --txt:#DCE3EA; --mut:#8A94A1; --jade:#3FB68B; --red:#D45D5D; --amber:#E8A33D;
+  --blue:#41C0F2;
+  --mono:"SF Mono","Cascadia Code",Consolas,"Roboto Mono",monospace;
+  --disp:"Avenir Next Condensed","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+  --body:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--txt);font-family:var(--body);font-size:14px;line-height:1.55}
+.wrap{max-width:1060px;margin:0 auto;padding:28px 26px 70px}
+h1{font-family:var(--disp);font-size:30px;letter-spacing:.03em;text-transform:uppercase}
+h1 b{color:var(--jade)}
+.lede{color:var(--mut);margin:4px 0 20px;max-width:680px}
+h2{font-family:var(--disp);font-size:19px;text-transform:uppercase;letter-spacing:.06em;
+  margin:34px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h2 .n{color:var(--amber);font-family:var(--mono);font-size:13px;margin-right:8px}
+.doctrine{background:linear-gradient(90deg,rgba(63,182,139,.12),transparent);
+  border-left:3px solid var(--jade);padding:12px 16px;margin:0 0 8px;font-size:13px}
+.doctrine b{color:var(--jade);font-family:var(--mono);font-size:11px;text-transform:uppercase;
+  letter-spacing:.1em;display:block;margin-bottom:4px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+th{font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--mut);text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+td.st{color:var(--jade);font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+tr.warn td.st{color:var(--red)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:16px;margin-top:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px}
+.card h3{font-family:var(--disp);font-size:17px;text-transform:uppercase;letter-spacing:.05em;color:var(--jade)}
+.card .role{color:var(--mut);font-size:12.5px;margin:3px 0 10px;font-style:italic}
+.spec{font-family:var(--mono);font-size:11.5px}
+.spec div{padding:4px 0;border-top:1px solid var(--panel2)}
+.spec b{color:var(--amber);display:inline-block;min-width:64px;font-size:10px;
+  text-transform:uppercase;letter-spacing:.08em}
+.spec .when b{color:var(--blue)}
+.foot{margin-top:40px;font-family:var(--mono);font-size:10.5px;color:var(--mut);
+  border-top:1px solid var(--line);padding-top:10px}
+a{color:var(--jade)}
+@media (max-width:560px){.cards{grid-template-columns:1fr}}
+</style></head>
+<body><div class="wrap">
+<h1>SMSF <b>Playbook</b></h1>
+<p class="lede">Single-expiry structure selection for the cash account — SPX / RUT.
+The live selector is the <b>SMSF</b> tab in the app (Gate S); this page is the build
+reference behind each variant it can recommend.</p>
+
+<div class="doctrine"><b>Cash-account doctrine</b>
+Single expiry only — calendars, diagonals and double calendars are blocked on EU
+cash-settled indices in a cash account, at initiation <i>and</i> as adjustments.
+Replicate what the time spread <i>does</i>: upside T+0 flattening → call debit
+vertical / ITM call / call BWB; positive vega → enter longer DTE (60–90);
+"buy time" → roll the tested wing or stack a second tent. All adjustments are
+<b style="display:inline;color:var(--amber)">debit-side</b> — credit-spread adds
+consume cash equal to their full width.</div>
+
+<h2><span class="n">01</span>Decision Table — Gate S</h2>
+<p class="lede">Three inputs pick the variant: IV band (IV rank percentile bands:
+CMP &lt;25 · NRM &lt;60 · ELV &lt;85 · STR ≥85), 25Δ skew (rr25 = 25Δ put IV − call IV;
+RICH when &gt;30% of ATM IV), and bias. Term structure is the overlay: inverted front
+= de-gross regime, whatever the row says.</p>
+<table>
+<tr><th>IV band</th><th>Skew</th><th>Bias</th><th>Top structure</th><th>Logic</th></tr>
+<tr><td>NRM</td><td>RICH (put)</td><td>Neutral</td><td class="st">Put BWB</td>
+  <td>Default income row — steep skew pays for the broken wing</td></tr>
+<tr><td>NRM</td><td>RICH (put)</td><td>Bull</td><td class="st">Put BWB + ITM call (M3)</td>
+  <td>ITM call does the call-calendar's job in one expiry</td></tr>
+<tr><td>NRM</td><td>RICH (put)</td><td>Bear</td><td class="st">OTM put fly</td>
+  <td>Body at −1σ; profits from drift into the tent</td></tr>
+<tr><td>NRM</td><td>Flat</td><td>Neutral</td><td class="st">Balanced ATM put fly</td>
+  <td>No skew subsidy — symmetric structures price fairly; all-put for cash efficiency</td></tr>
+<tr><td>NRM</td><td>Call bid (rr25 &lt; 0)</td><td>Any</td><td class="st">Call BWB / call fly</td>
+  <td>Upside is the expensive side — sell it (post-crash rebound, RUT squeezes)</td></tr>
+<tr><td>ELV / STR</td><td>RICH (put)</td><td>Any</td><td class="st">Wide OTM put fly</td>
+  <td>Sell the richest downside strikes; size down 25–50%, take profits early</td></tr>
+<tr><td>ELV / STR</td><td>Flat</td><td>Neutral</td><td class="st">Iron fly</td>
+  <td>Rich straddle premium; short hold — but note the double cash width</td></tr>
+<tr><td>CMP</td><td>Any</td><td>View + level</td><td class="st">Directional target fly</td>
+  <td>Premium too thin for income; long fly at the target is cheap convexity</td></tr>
+<tr class="warn"><td>CMP</td><td>Any</td><td>Neutral</td><td class="st">STAND ASIDE</td>
+  <td>No paid single-expiry income structure — wait or deploy in margin book</td></tr>
+<tr class="warn"><td>Any</td><td>Any</td><td>Any + INVERTED FRONT</td><td class="st">DE-GROSS</td>
+  <td>Stress regime: all short-gamma books correlate; small short-DTE iron fly at most</td></tr>
+</table>
+
+<h2><span class="n">02</span>Build Specs</h2>
+<div class="cards">
+
+<div class="card"><h3>Put BWB</h3>
+<div class="role">Default SMSF income engine — skew pays for the asymmetry</div>
+<div class="spec">
+<div class="when"><b>When</b> Mid IV + steep put skew + neutral-to-slightly-bearish</div>
+<div><b>DTE</b> 60–80 entry; exit/roll by 30–35 DTE</div>
+<div><b>Body</b> Shorts 20–40 pts below spot (≈ −0.5σ to −1σ, ~30–35Δ)</div>
+<div><b>Wings</b> Upper 20–30 pts above body; lower broken 2–3× wider. Steeper skew ⇒ widen the broken wing for the same debit, or enter at a credit</div>
+<div><b>Cash</b> Lower-wing width × 100 − credit (or + debit)</div>
+<div><b>Manage</b> Target 8–12% of max risk. Debit-side adjustments only: call debit spread above the tent on a rally; stack a second BWB lower on a break</div>
+</div></div>
+
+<div class="card"><h3>Put BWB + ITM Call (M3)</h3>
+<div class="role">Single-expiry cousin of the fly + call calendar combo</div>
+<div class="spec">
+<div class="when"><b>When</b> Mid IV + steep skew + mildly bullish bias</div>
+<div><b>DTE</b> 60–80, both components SAME expiry; exit by 30–35 DTE</div>
+<div><b>Body</b> BWB as standard; add 1 ITM call (70–80Δ) per 1–2 flies, strike ≈ 3–5% below spot</div>
+<div><b>Wings</b> The ITM call replaces the call calendar: upside T+0 flattening + positive delta</div>
+<div><b>Cash</b> Call debit adds; net position delta ≈ flat to +5 per lot</div>
+<div><b>Manage</b> Rally: call pays — roll it up (debit-neutral vertical roll). Selloff: call is the sacrifice, tent catches</div>
+</div></div>
+
+<div class="card"><h3>Balanced ATM Put Fly</h3>
+<div class="role">Symmetric carry when skew gives no subsidy</div>
+<div class="spec">
+<div class="when"><b>When</b> Mid IV + flat skew + neutral</div>
+<div><b>DTE</b> 45–60; exit by 21 DTE or at target</div>
+<div><b>Body</b> Shorts at the money</div>
+<div><b>Wings</b> Symmetric 30–50 pts each side (SPX); ~1σ of remaining DTE</div>
+<div><b>Cash</b> One wing width × 100 − credit. Prefer all-put over iron fly: same graph, half the cash</div>
+<div><b>Manage</b> Target 10–15%; no repair doctrine — exit and re-centre</div>
+</div></div>
+
+<div class="card"><h3>Iron Fly</h3>
+<div class="role">Rich-premium harvest in high IV when skew is flat</div>
+<div class="spec">
+<div class="when"><b>When</b> High IV + flat skew + pinned market</div>
+<div><b>DTE</b> 30–45 (shorter than the BWB book); exit fast</div>
+<div><b>Body</b> Shorts straddle ATM</div>
+<div><b>Wings</b> Wide — 1.25–1.5σ; high IV means wide wings still pay</div>
+<div><b>Cash</b> CAUTION: two credit spreads ⇒ cash held on BOTH widths. All-put balanced fly = same graph at half the cash</div>
+<div><b>Manage</b> Take 25% of credit quickly — these are IV-crush trades, not hold-to-expiry trades</div>
+</div></div>
+
+<div class="card"><h3>OTM Put Fly (Wide)</h3>
+<div class="role">High-IV income with a bearish tilt — profits from drift into the tent</div>
+<div class="spec">
+<div class="when"><b>When</b> High IV + steep skew; also mid IV + bearish bias</div>
+<div><b>DTE</b> 45–60; exit by 21 DTE</div>
+<div><b>Body</b> Shorts at −1σ to −1.5σ below spot</div>
+<div><b>Wings</b> Wider than normal (vol-of-vol high): 40–60 pts SPX equivalent; size DOWN 25–50%</div>
+<div><b>Cash</b> Symmetric version in high IV — the broken wing adds tail cash use exactly when tails are live</div>
+<div><b>Manage</b> Target 8–10%, taken EARLY — IV crush does the work if price sits</div>
+</div></div>
+
+<div class="card"><h3>Call BWB / Call Fly</h3>
+<div class="role">Sell the upside when the call wing is the expensive side</div>
+<div class="spec">
+<div class="when"><b>When</b> Call skew bid (rr25 negative) — post-crash rebounds, squeezes; more common in RUT</div>
+<div><b>DTE</b> 45–60</div>
+<div><b>Body</b> Shorts 1–3% above spot at the richest call strikes</div>
+<div><b>Wings</b> Lower wing near spot; upper wing broken wider above</div>
+<div><b>Cash</b> Broken-wing math mirrored from the put BWB</div>
+<div><b>Manage</b> Also the standing upside ADJUSTMENT: where the margin book adds a call diagonal, this book adds a small call BWB — similar T+0 reshaping, one expiry</div>
+</div></div>
+
+<div class="card"><h3>Directional Target Fly</h3>
+<div class="role">Cheap convexity to a specific level — a trade, not income</div>
+<div class="spec">
+<div class="when"><b>When</b> Low IV with a directional view, or any strong view with a level</div>
+<div><b>DTE</b> Match the thesis horizon; 20–45 typical</div>
+<div><b>Body</b> Centred AT the target — call fly above for bullish, put fly below for bearish</div>
+<div><b>Wings</b> Narrow (10–25 pts SPX) — maximise reward-to-risk</div>
+<div><b>Cash</b> Debit only — cheapest structure in the book</div>
+<div><b>Manage</b> Lotto discipline: ≤ 0.25% NLV, no adjustments, take 100–200% of debit or let it die</div>
+</div></div>
+
+</div>
+
+<h2><span class="n">03</span>Calendar-Function Substitution Map</h2>
+<table>
+<tr><th>Calendar / diagonal role (margin book)</th><th>Single-expiry equivalent (SMSF)</th></tr>
+<tr><td>Upside T+0 flattening (call cal over fly body)</td><td class="st">Call debit vertical · call BWB above the tent</td></tr>
+<tr><td>Delta rescue on rally</td><td class="st">Long call / call vertical · roll the fly up</td></tr>
+<tr><td>Positive vega offset to the fly's short vega</td><td class="st">Enter at 60–90 DTE · far-OTM long put units</td></tr>
+<tr><td>"Buy time" on a tested side</td><td class="st">Roll the tested wing out · stack a second BWB at the new price</td></tr>
+</table>
+
+<div class="foot">Source of truth: <b>selection/smsf.py → BUILD_SPECS + gate_s()</b>.
+Live selector: SMSF tab in the app · companion refs:
+<a href="/static/te_playbook.html">TE Playbook</a> ·
+<a href="/static/sentinel_matrix.html">Sentinel Adjustment Matrix</a>.
+Advisory only — hard gates and the drawdown ladder still apply; the SMSF sleeve
+counts in book-level short-gamma stress.</div>
+</div></body></html>

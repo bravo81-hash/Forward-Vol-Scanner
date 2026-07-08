@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TE Playbook — Strategy Reference</title>
+<style>
+:root{
+  --ink:#0E1116; --panel:#161B22; --panel2:#1C232C; --line:#2A3340;
+  --txt:#DCE3EA; --mut:#8A94A1; --jade:#3FB68B; --red:#D45D5D; --amber:#E8A33D;
+  --mono:"SF Mono","Cascadia Code",Consolas,"Roboto Mono",monospace;
+  --disp:"Avenir Next Condensed","Arial Narrow","Helvetica Neue",Arial,sans-serif;
+  --body:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--ink);color:var(--txt);font-family:var(--body);font-size:14px;line-height:1.5}
+a{color:var(--jade)}
+.app{display:grid;grid-template-columns:215px 1fr;min-height:100vh}
+/* ---- rail ---- */
+.rail{background:var(--panel);border-right:1px solid var(--line);padding:18px 0;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{font-family:var(--disp);font-size:19px;letter-spacing:.06em;text-transform:uppercase;padding:0 16px 4px}
+.brand b{color:var(--amber)}
+.sub{font-family:var(--mono);font-size:10px;color:var(--mut);padding:0 16px 14px}
+.navhdr{font-family:var(--mono);font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.12em;padding:12px 16px 4px}
+.nav button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--txt);
+  padding:7px 16px;font:inherit;font-size:13px;cursor:pointer;border-left:3px solid transparent}
+.nav button:hover{background:var(--panel2)}
+.nav button.on{border-left-color:var(--amber);background:var(--panel2);color:#fff}
+.nav button:focus-visible{outline:2px solid var(--amber);outline-offset:-2px}
+.nav .tag{font-family:var(--mono);font-size:10px;color:var(--mut);display:block}
+/* ---- main ---- */
+.main{padding:24px 30px 60px;max-width:1060px}
+h1{font-family:var(--disp);font-size:30px;letter-spacing:.03em;text-transform:uppercase}
+h1 .greek{color:var(--amber);font-family:var(--mono);font-size:16px;vertical-align:middle;margin-left:10px}
+.lede{color:var(--mut);margin:4px 0 18px;max-width:640px}
+.console-strip{background:linear-gradient(90deg,rgba(232,163,61,.12),transparent);
+  border-left:3px solid var(--amber);padding:10px 14px;margin:0 0 18px;font-size:13px}
+.console-strip b{color:var(--amber);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;display:block;margin-bottom:3px}
+/* ---- graph ---- */
+.graphwrap{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px}
+svg{display:block;width:100%}
+.controls{display:flex;flex-wrap:wrap;gap:22px;margin:12px 2px 4px;font-family:var(--mono);font-size:11px}
+.ctl label{color:var(--mut);display:block;margin-bottom:3px}
+.ctl input[type=range]{width:170px;accent-color:var(--amber)}
+.ctl output{color:var(--amber);margin-left:6px}
+.metrics{display:flex;flex-wrap:wrap;gap:0;margin-top:12px;border-top:1px solid var(--line)}
+.metric{padding:10px 18px 2px 0;margin-right:18px}
+.metric .k{font-family:var(--mono);font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.1em}
+.metric .v{font-family:var(--mono);font-size:16px}
+.pos{color:var(--jade)} .neg{color:var(--red)} .amb{color:var(--amber)}
+.readout{font-family:var(--mono);font-size:11px;color:var(--mut);height:16px;margin-top:6px}
+/* ---- guideline columns ---- */
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}
+.col h3{font-family:var(--disp);font-size:15px;text-transform:uppercase;letter-spacing:.08em;
+  border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:8px}
+.col h3.setup{color:var(--jade)} .col h3.manage{color:var(--amber)}
+ul{list-style:none}
+li{padding:4px 0 4px 16px;position:relative;font-size:13px}
+li::before{content:"·";position:absolute;left:2px;color:var(--amber);font-weight:bold}
+li b{color:#fff}
+.greeksline{font-family:var(--mono);font-size:11px;color:var(--mut);margin-top:16px;
+  border:1px dashed var(--line);border-radius:4px;padding:8px 12px}
+.greeksline b{color:var(--txt)}
+/* ---- matrix ---- */
+table.mx{border-collapse:collapse;width:100%;font-size:13px;margin-top:10px}
+.mx th,.mx td{border:1px solid var(--line);padding:8px 10px;text-align:left}
+.mx th{background:var(--panel2);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut)}
+.mx td.s{font-family:var(--mono);color:var(--amber)}
+.note{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;margin-top:18px;font-size:13px}
+.note h3{font-family:var(--disp);text-transform:uppercase;letter-spacing:.08em;font-size:15px;margin-bottom:6px;color:var(--jade)}
+@media(max-width:760px){.app{grid-template-columns:1fr}.rail{position:static;height:auto}.cols{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:no-preference){.main{animation:fade .25s ease}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="rail">
+  <div class="brand">TE <b>PLAYBOOK</b></div>
+  <div class="sub">strategy reference · v1.4<br>pairs with TE Console v2.2<br>+ selection app (Forward-Vol-Scanner)</div>
+  <nav class="nav" id="nav">
+    <div class="navhdr">Selection</div>
+    <button data-v="matrix" class="on">Regime → strategy matrix</button>
+    <button data-v="em">Using expected moves</button>
+    <div class="navhdr">Concepts (start here)</div>
+    <button data-v="c_vrp">VRP — the seller's paycheck</button>
+    <button data-v="c_gex">GEX &amp; the gamma flip</button>
+    <button data-v="c_vanna">Vanna &amp; charm</button>
+    <button data-v="c_fwd">Forward vol</button>
+    <button data-v="c_kink">Event kinks</button>
+    <div class="navhdr">Premium / theta</div>
+    <button data-v="condor">Iron condor <span class="tag">normal vol · range</span></button>
+    <button data-v="bwb">Put BWB <span class="tag">elevated vol · skew rich</span></button>
+    <button data-v="pinfly">Pin butterfly <span class="tag">OpEx week · +γ</span></button>
+    <button data-v="otmfly">OTM put butterfly <span class="tag">drift-down lean</span></button>
+    <div class="navhdr">Time / vega</div>
+    <button data-v="calendar">Calendar <span class="tag">calm vol · range</span></button>
+    <button data-v="dblcal">Double calendar <span class="tag">calm vol · wider range</span></button>
+    <button data-v="diagonal">Diagonal <span class="tag">calm vol · trend</span></button>
+  </nav>
+</aside>
+<main class="main" id="main"></main>
+</div>
+
+<script>
+"use strict";
+/* ============================ pricing engine ============================ */
+function normCdf(x){const a1=.254829592,a2=-.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=.3275911;
+  const s=x<0?-1:1;x=Math.abs(x)/Math.SQRT2;const t=1/(1+p*x);
+  const y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return .5*(1+s*y);}
+function bs(S,K,T,iv,r,cp){if(T<=0)return Math.max(0,cp==='C'?S-K:K-S);
+  const d1=(Math.log(S/K)+(r+iv*iv/2)*T)/(iv*Math.sqrt(T)),d2=d1-iv*Math.sqrt(T);
+  return cp==='C'?S*normCdf(d1)-K*Math.exp(-r*T)*normCdf(d2):K*Math.exp(-r*T)*normCdf(-d2)-S*normCdf(-d1);}
+const R=.04, SPOT=6000;
+function val(S,legs,el,ivS){let v=0;for(const l of legs)v+=l.qty*bs(S,l.K,Math.max(0,l.dte-el)/365,Math.max(.01,l.iv+ivS),R,l.cp);return v;}
+
+/* ============================ strategies ============================ */
+const STRATS={
+condor:{
+ name:"Iron Condor", greek:"θ+ · ν− · γ−",
+ legs:[{cp:'P',K:5790,dte:30,iv:.17,qty:-1},{cp:'P',K:5730,dte:30,iv:.18,qty:1},
+       {cp:'C',K:6210,dte:30,iv:.13,qty:-1},{cp:'C',K:6270,dte:30,iv:.125,qty:1}],
+ maxEl:30,
+ lede:"Sell both tails, defined risk both sides. Pure rent collection when price is boxed and options are overpriced.",
+ console:"Normal vol (IV pctl 25–60) · rangebound (ADX < 20) · stabilizing tape (+γ proxy) · Premium row green (VRP > 0).",
+ setup:["<b>Expiry:</b> single cycle, 21–35 DTE — the console's single-expiry pick.",
+  "<b>Short strikes:</b> at or just OUTSIDE the expected-move cone for your hold (≈ ±1σ). Inside the cone you're betting against the math.",
+  "<b>Walls:</b> if a short lands on a high-OI strike the live scan flags it (WALL) — shift one strike past the wall; magnets pull price to them.",
+  "<b>Wings:</b> 50–75 pts (SPX). Wider wings = more credit, more tail risk; pick width so max loss ≤ 3× credit.",
+  "<b>Credit:</b> target ≥ ⅓ of wing width. Less means strikes too far or vol too cheap — skip.",
+  "<b>Wrapper:</b> SPX/RUT preferred; if ETF, no short strike that can go ITM through ex-div."],
+ manage:["<b>Profit take:</b> 50–60% of max credit, or day 5–10 — whichever first.",
+  "<b>Adjust trigger:</b> price tags the EM cone edge / short-strike delta doubles → roll the tested side out and/or down-size.",
+  "<b>Hard stop:</b> loss = 1.5× credit received. No averaging.",
+  "<b>Never</b> hold into the final 7 DTE — gamma week converts rent into coin-flips.",
+  "<b>Skip day:</b> any red gate (VIX spike, −γ, FOMC inside expiry)."]},
+bwb:{
+ name:"Broken-Wing Put Butterfly", greek:"θ+ · ν− · skew-financed",
+ legs:[{cp:'P',K:5950,dte:30,iv:.16,qty:1},{cp:'P',K:5850,dte:30,iv:.175,qty:-2},{cp:'P',K:5700,dte:30,iv:.20,qty:1}],
+ maxEl:30,
+ lede:"Butterfly with the lower wing stretched. Steep put skew pays for the stretch — little or no upside risk, profit zone below spot.",
+ console:"Elevated vol (IV pctl 60–85) · put skew rich (Skew z > 1) · works in +γ at full size, −γ at HALF size (defined risk is the point).",
+ setup:["<b>Expiry:</b> 28–35 DTE single cycle.",
+  "<b>Upper long:</b> 0–50 pts below spot. <b>Body (2× short):</b> ~100–150 pts below, ideally at a big OI / gamma-wall strike. <b>Lower long:</b> stretched 1.5× the upper width.",
+  "<b>Entry cost:</b> near zero or small credit — skew does the financing. Paying a real debit = skew not rich enough, wrong day.",
+  "<b>Why elevated vol:</b> short body vega + vanna tailwind — vol crush pushes price up toward (not through) the structure while IV bleed pays you.",
+  "<b>No upside risk</b> when entered at credit: rally = keep the credit."],
+ manage:["<b>Profit take:</b> 30–50% of max at the body, or day 5–10.",
+  "<b>Tested:</b> price into the body early → harvest; through the body fast → close the broken side, leave the credit-side alone.",
+  "<b>Hard stop:</b> loss = width difference × 0.5 (half the stretched-wing risk).",
+  "<b>Vol spike against you</b> (IV up, price down through body): structure is short vol below — cut, don't hope.",
+  "<b>FOMC inside expiry:</b> acceptable only if entered at credit; never for a debit."]},
+pinfly:{
+ name:"Pin Butterfly (OpEx)", greek:"θ++ · γ−− · 3–7 day hold",
+ legs:[{cp:'C',K:5950,dte:7,iv:.14,qty:1},{cp:'C',K:6000,dte:7,iv:.135,qty:-2},{cp:'C',K:6050,dte:7,iv:.13,qty:1}],
+ maxEl:7,
+ lede:"Cheap lottery ticket on price gravitating to a strike into OpEx. Tiny debit, big multiple if the pin holds.",
+ console:"OpEx week only · rangebound · +γ proxy (dealers fading moves is the entire thesis). The console's only sub-21-DTE structure.",
+ setup:["<b>Expiry:</b> the monthly OpEx Friday itself (console prints the date).",
+  "<b>Body:</b> AT the highest-gravity strike. Live scans print the max-OI pin strike and flag the card if the body misses it — recenter to the printed pin, not to spot.",
+  "<b>Wings:</b> 25–50 pts SPX, symmetric. Debit ≤ 15% of wing width.",
+  "<b>Size by debit:</b> this is a low-probability/high-multiple trade — risk what you're happy to lose 100% of.",
+  "<b>Quarterly OpEx bonus:</b> known collar strikes = stronger magnets."],
+ manage:["<b>Profit take:</b> 100–200% of debit any time it's offered — pins break.",
+  "<b>No adjustment:</b> binary by design. It works or it expires.",
+  "<b>Exit by 14:00 ET Friday</b> — never hold through the close/settlement.",
+  "<b>Abort signal:</b> −γ flip or VIX spike mid-week → close for whatever it fetches."]},
+otmfly:{
+ name:"OTM Put Butterfly", greek:"θ+ · mild δ− · cheap convexity",
+ legs:[{cp:'P',K:5850,dte:30,iv:.175,qty:1},{cp:'P',K:5750,dte:30,iv:.19,qty:-2},{cp:'P',K:5650,dte:30,iv:.205,qty:1}],
+ maxEl:30,
+ lede:"Symmetric fly parked below market. Small debit that pays a fat multiple on a controlled drift lower.",
+ console:"Alternative the console offers next to the condor — pick it over the condor when Direction row leans DOWN (−1/−2) but vol isn't elevated enough for a BWB.",
+ setup:["<b>Expiry:</b> 28–35 DTE.",
+  "<b>Body:</b> at the lower edge of the EM cone — where a normal-sized down-move lands, not a crash.",
+  "<b>Wings:</b> symmetric, 75–100 pts SPX. Debit ≤ 10–15% of width.",
+  "<b>Thesis:</b> drift, not crash. A crash blows through the body — that's the BWB's or a vertical's job."],
+ manage:["<b>Profit take:</b> 100% of debit, or price reaches the body with > 10 DTE left — take it, don't wait for max.",
+  "<b>Time stop:</b> day 10 regardless. OTM flies only bloom near expiry; you're not staying for that.",
+  "<b>Stop:</b> mental at 50–60% of debit, or thesis break (range resolves UP).",
+  "<b>Cheap day:</b> these are best bought on quiet green days when downside is unloved."]},
+calendar:{
+ name:"Calendar", greek:"θ+ · ν+ · γ− front",
+ legs:[{cp:'P',K:6000,dte:14,iv:.15,qty:-1},{cp:'P',K:6000,dte:35,iv:.145,qty:1}],
+ maxEl:14,
+ lede:"Sell fast-decaying front time, own slow back time at the same strike. Pays from theta differential and any vol lift.",
+ console:"Calm vol (IV pctl < 25) · rangebound · curve verdict CHEAP FWD or FLAT. Also fires in any regime on FRONT RICH (inverted front — selling the expensive leg). Console prints the exact Sell/Buy Friday pair from the forward-vol engine.",
+ setup:["<b>Expiry pair:</b> take the console pair (front 12–21d / back 26–45d); confirm edge on the real chain — curve says where, chain says how much.",
+  "<b>Strike:</b> ATM for pure income; shade 20–40 pts toward Direction-row lean.",
+  "<b>Debit check:</b> against the EM cone — debit > ~40% of one EM width means you're overpaying for the tent.",
+  "<b>Why calm vol:</b> back vega is cheap; you own it at the lows. Vol can only hurt you by falling further from the floor.",
+  "<b>Event rule:</b> front leg containing FOMC = only if the front is visibly rich (console *FOMC tag). Event in the BACK only = never — the engine already filters these."],
+ manage:["<b>Profit take:</b> 20–30% on debit, or day 5–10.",
+  "<b>Tent edge tag</b> (price reaches a breakeven): roll the calendar toward price, or convert to double calendar.",
+  "<b>Front at 7 DTE:</b> close or roll the front out — never hold short gamma into its final week.",
+  "<b>Vol crush risk:</b> IV drop is the real enemy (long vega). VVIX falling hard + VIX bleeding = exit early.",
+  "<b>Stop:</b> 25–30% of debit."]},
+dblcal:{
+ name:"Double Calendar", greek:"θ+ · ν+ · wide tent",
+ legs:[{cp:'P',K:5900,dte:14,iv:.16,qty:-1},{cp:'P',K:5900,dte:35,iv:.155,qty:1},
+       {cp:'C',K:6100,dte:14,iv:.135,qty:-1},{cp:'C',K:6100,dte:35,iv:.13,qty:1}],
+ maxEl:14,
+ lede:"Two calendars straddling spot. Twin peaks, wider profit zone, double the vega — the calendar for a less certain range.",
+ console:"Same trigger as the calendar (calm vol · range); console lists it as the alternative when you want range width over peak height.",
+ setup:["<b>Strikes:</b> at the EM cone edges (±1σ for the hold) — the tent then covers the probable range.",
+  "<b>Expiry pair:</b> same console pair as the single calendar, both sides.",
+  "<b>Cost:</b> ~2× the single calendar; demand the same per-unit curve edge.",
+  "<b>Pick it over single when:</b> ADX very low but ATR% still normal — range likely, location not."],
+ manage:["<b>Profit take:</b> 15–25% on debit (twin peaks rarely both pay — take the blended number).",
+  "<b>One side tagged:</b> close the far calendar, recenter it at the new EM edge.",
+  "<b>Front 7 DTE / vol-crush / stop rules:</b> identical to the single calendar, doubled vega means doubled urgency on crush."]},
+diagonal:{
+ name:"Diagonal (call side shown)", greek:"θ+ · ν+ · δ+",
+ legs:[{cp:'C',K:6050,dte:35,iv:.135,qty:1},{cp:'C',K:6150,dte:14,iv:.13,qty:-1}],
+ maxEl:14,
+ lede:"Calendar with a directional tilt: long back-month nearer the money, short front-month further out. Theta plus trend participation.",
+ console:"Calm vol (IV pctl < 25) · TRENDING (ADX > 20). Console prints CALL side in an uptrend, PUT side in a downtrend, plus the Friday pair.",
+ setup:["<b>Long leg:</b> back expiry (console pair), 0–60 pts OTM in trend direction.",
+  "<b>Short leg:</b> front expiry, 80–120 pts further OTM — outside the EM cone so a normal trend move doesn't run it over.",
+  "<b>Debit:</b> ≤ width between strikes × 0.5 — beyond that you're buying a vertical at calendar prices.",
+  "<b>Direction check:</b> Bias row must agree with the side. Bias 0 = take the calendar instead."],
+ manage:["<b>Profit take:</b> 25–40% on debit, or short strike reached with profit — take it.",
+  "<b>Trend stalls</b> (ADX rolls under 20): convert to calendar (roll long leg to the short's strike) or close.",
+  "<b>Short leg breached:</b> roll it out-and-up (same expiry rules), never naked.",
+  "<b>Front 7 DTE rule applies.</b> Stop: 30% of debit or trend reversal through the 21 EMA."]}
+};
+
+
+/* ================= entry greeks targets (per 1-lot, ratio-based) ========== */
+const TARGETS={
+condor:[
+ ["Net delta","|Δ| ≤ 0.05","Recenter the shorts — skew makes the put side carry more delta at equal distance, so balance by DELTA, not by points from spot."],
+ ["Short-strike deltas","0.10–0.18 each side, within ~0.04 of each other","Move the heavier side out one strike."],
+ ["Theta","θ > 0 from day one","If not, shorts are too far out for the credit — bring them in or shorten DTE."],
+ ["Vega tolerance","ν negative, |ν| ≤ 3×θ","Bigger ratio = one vol spike erases 3+ days of rent. Shorten DTE or widen shorts."],
+ ["Credit","≥ ⅓ of wing width","Below that, skip — the app already scores this down."]],
+bwb:[
+ ["Net delta","+0.02 to +0.10","Too positive: upper long too far below spot — bring it up. Negative: body too close."],
+ ["Body short delta","0.25–0.35 per short","The sweet spot where skew richness concentrates."],
+ ["Theta","θ > 0","Debit entries with θ ≤ 0 are double-wrong — wrong day for the structure."],
+ ["Vega","0 to slightly negative","You want vol crush working for you, not a big short-vol bet."],
+ ["Entry price","credit ≥ 0 ideal","Lever: stretch the lower wing further (adds defined downside risk) or move the body down."]],
+pinfly:[
+ ["Net delta","|Δ| ≤ 0.05","Body sits at the magnet strike, not your opinion."],
+ ["Debit","≤ 15% of wing width","The ONLY entry filter that matters here — Greeks are secondary on a binary."],
+ ["Gamma","very negative — accepted","This is the one structure where you knowingly hold gamma risk; size by debit."]],
+otmfly:[
+ ["Net delta","−0.03 to −0.08","More negative = you've bought a directional bet, not convexity. Body too close."],
+ ["Body delta","~0.20–0.25","Lands the body where a normal-sized down-move goes."],
+ ["Theta","≈ 0 at entry","Normal — this trade is convexity, not carry. θ turns positive as price approaches the body."],
+ ["Debit","≤ 10–15% of width","Lever: widen wings or move body to the EM edge."]],
+calendar:[
+ ["Net delta","|Δ| ≤ 0.05 income / up to ±0.10 with bias","Lever: shift the strike toward the Direction lean."],
+ ["Theta / debit","≥ +2% per day","Low: front too far out or gap too narrow — sell a closer front."],
+ ["Vega / debit","+6% to +10% per vol pt","Higher = crush-fragile. Lever: narrow the expiry gap (less back-month vega)."],
+ ["Gamma","small negative; must pass the daily breakeven test (below)","Lever: front leg further out."]],
+dblcal:[
+ ["Net delta","|Δ| ≤ 0.05","Strikes symmetric by DELTA: front short put and short call deltas within ~0.05."],
+ ["Theta / debit","≥ +1.5% per day","Twin tents pay slightly less per unit than one ATM tent — that's the price of width."],
+ ["Vega / debit","+8% to +12%","Double the vega of a single — crush urgency is doubled too."]],
+diagonal:[
+ ["Net delta","+0.10 to +0.25 with the trend (mirror for puts)","Below +0.10 you wanted a calendar; above +0.25 you wanted a vertical."],
+ ["Short-leg delta","0.20–0.30","Outside the EM but still paying real premium."],
+ ["Theta","θ > 0 always","θ < 0 means the long leg is too expensive/ITM — it's a debit vertical in disguise."],
+ ["Vega / debit","+3% to +6%","About half a calendar's — the directional tilt costs vega exposure."]]
+};
+const GAMMA_TEST = "Universal entry test — daily gamma breakeven: ½·|Γ|·(1-day expected move)² ≤ θ. If one average day's gamma loss exceeds one day's theta, the structure carries too much gamma for its rent: push expiry out, widen wings, or pass.";
+
+/* ============================== concepts =================================== */
+function conceptSvg(inner,W=920,H=300){return `<div class="graphwrap"><svg viewBox="0 0 ${W} ${H}">${inner}</svg></div>`;}
+function axis(W,H,padL,padB){return `<line x1="${padL}" y1="${H-padB}" x2="${W-10}" y2="${H-padB}" stroke="var(--line)"/><line x1="${padL}" y1="10" x2="${padL}" y2="${H-padB}" stroke="var(--line)"/>`;}
+
+function vrpView(){
+ // stylized IV vs RV series with shaded gap
+ const W=920,H=300,pl=50,pb=30,n=60;let iv="",rv="",poly="";const pts=[];
+ for(let i=0;i<n;i++){const x=pl+i/(n-1)*(W-pl-20);
+  const r=13+3*Math.sin(i/7)+2*Math.sin(i/3.1);const v=r+3+1.2*Math.sin(i/9+1);
+  const Y=p=>H-pb-(p-6)/16*(H-pb-20);
+  iv+=(i?"L":"M")+x.toFixed(1)+","+Y(v).toFixed(1);rv+=(i?"L":"M")+x.toFixed(1)+","+Y(r).toFixed(1);
+  pts.push([x,Y(v),Y(r)]);}
+ poly="M"+pts.map(p=>p[0]+","+p[1]).join(" L")+" L"+pts.slice().reverse().map(p=>p[0]+","+p[2]).join(" L")+" Z";
+ return `<h1>VRP — Volatility Risk Premium<span class="greek">the seller's paycheck</span></h1>
+ <p class="lede">Implied volatility is the PRICE of insurance. Realized volatility is what the market actually did. Most of the time, insurance sells for more than it pays out — that persistent gap is the volatility risk premium, and harvesting it is the entire premise of premium selling.</p>
+ ${conceptSvg(axis(W,H,pl,pb)+`<path d="${poly}" fill="var(--jade)" fill-opacity=".13"/>
+  <path d="${iv}" fill="none" stroke="var(--amber)" stroke-width="2"/>
+  <path d="${rv}" fill="none" stroke="var(--jade)" stroke-width="2"/>
+  <text x="80" y="40" fill="var(--amber)" font-size="12" font-family="var(--mono)">implied vol (what you SELL)</text>
+  <text x="80" y="58" fill="var(--jade)" font-size="12" font-family="var(--mono)">realized vol (what you PAY OUT)</text>
+  <text x="560" y="120" fill="var(--jade)" font-size="12" font-family="var(--mono)">shaded gap = VRP = your edge</text>`)}
+ <div class="cols"><div class="col"><h3 class="setup">The number</h3><ul>
+ <li><b>VRP = IV30 − RV21</b> in vol points, matched windows. The console's Premium row; the app computes it per ticker.</li>
+ <li>Positive and stable (e.g. +2 to +5v on SPX) → selling pays. The bigger and steadier, the better the day.</li>
+ <li><b>Negative</b> (realized above implied) → the market is moving MORE than options charge for. Sellers are underpaid — the app hard-limits the family list on these days.</li></ul></div>
+ <div class="col"><h3 class="manage">Why the gap exists</h3><ul>
+ <li>Structural demand for protection (funds must hedge) + sellers demand compensation for crash risk.</li>
+ <li>It's a premium FOR a reason: rare large losses. VRP harvesting works because of discipline (defined risk, gamma-aware exits), not because the losses never come.</li>
+ <li>Falling short-term realized (RV7 &lt; RV21) is the tailwind version: the gap is widening under you.</li></ul></div></div>`;
+}
+
+function gexView(){
+ const W=920,H=320,pl=60,pb=34;const X=f=>pl+f*(W-pl-20);const Y0=H/2-10;
+ let curve="";for(let i=0;i<=100;i++){const f=i/100;const g=Math.tanh((f-0.42)*5);
+  curve+=(i?"L":"M")+X(f).toFixed(1)+","+(Y0-g*90).toFixed(1);}
+ return `<h1>GEX &amp; the Gamma Flip<span class="greek">why the tape fades or runs</span></h1>
+ <p class="lede">Dealers take the other side of the market's option positions and hedge their delta continuously. Whether that hedging DAMPS price moves or AMPLIFIES them depends on the sign of dealers' net gamma — and it flips at a specific spot level.</p>
+ ${conceptSvg(`<line x1="${pl}" y1="${Y0}" x2="${W-10}" y2="${Y0}" stroke="var(--line)"/>
+  <path d="${curve}" fill="none" stroke="var(--amber)" stroke-width="2.5"/>
+  <line x1="${X(0.42)}" y1="20" x2="${X(0.42)}" y2="${H-pb}" stroke="#fff" stroke-opacity=".3" stroke-dasharray="4 4"/>
+  <text x="${X(0.42)}" y="${H-12}" fill="#fff" font-size="12" font-family="var(--mono)" text-anchor="middle">GAMMA FLIP level</text>
+  <text x="${X(0.7)}" y="${Y0-110}" fill="var(--jade)" font-size="13" font-family="var(--mono)" text-anchor="middle">DEALERS LONG GAMMA (+γ)</text>
+  <text x="${X(0.7)}" y="${Y0-94}" fill="var(--mut)" font-size="11" text-anchor="middle">price up → they sell · price down → they buy</text>
+  <text x="${X(0.7)}" y="${Y0-78}" fill="var(--jade)" font-size="11" text-anchor="middle">moves get FADED → ranges, pins, low realized vol</text>
+  <text x="${X(0.16)}" y="${Y0+72}" fill="var(--red)" font-size="13" font-family="var(--mono)" text-anchor="middle">DEALERS SHORT GAMMA (−γ)</text>
+  <text x="${X(0.16)}" y="${Y0+88}" fill="var(--mut)" font-size="11" text-anchor="middle">price down → they SELL more · up → they BUY</text>
+  <text x="${X(0.16)}" y="${Y0+104}" fill="var(--red)" font-size="11" text-anchor="middle">moves get AMPLIFIED → trends, gaps, crashes</text>
+  <text x="${pl+6}" y="26" fill="var(--mut)" font-size="11" font-family="var(--mono)">dealer net gamma →</text>
+  <text x="${W-14}" y="${H-12}" fill="var(--mut)" font-size="11" font-family="var(--mono)" text-anchor="end">spot price →</text>`,W,H)}
+ <div class="cols"><div class="col"><h3 class="setup">Mechanics in 3 steps</h3><ul>
+ <li>You buy a put; the dealer is short it and hedges by shorting some futures. As spot falls the put's delta GROWS, so the dealer must short MORE into a falling market. Dealer short gamma = selling weakness, buying strength = amplification.</li>
+ <li>When the crowd is net selling options (covered calls, condors), dealers end up LONG gamma: their re-hedging buys dips and sells rips — the market feels glued.</li>
+ <li><b>GEX</b> (gamma exposure) totals this across all strikes. The spot level where it crosses zero is the <b>flip</b>. Big-OI strikes with concentrated gamma act as magnets ("walls") in +γ tape.</li></ul></div>
+ <div class="col"><h3 class="manage">Why you care</h3><ul>
+ <li>+γ regime: ranges and pins → condors, butterflies, pin flies thrive. −γ: realized vol expands → short-gamma entries are donations; only defined-risk, half size, or stand aside.</li>
+ <li>This is row 1 of the strategy matrix — it outranks almost everything else.</li>
+ <li>Two tiers in our stack. <b>Console:</b> behavioral proxy from tape (return autocorrelation, range-fading) — distrust it first when the tape disagrees. <b>App, live scans:</b> a real OI ladder on the shortlist's short expiry — call/put walls, max-OI pin strike, and a GEX sign from OI × BS-gamma. Better than the proxy, but the sign rests on the standard assumption (dealers long the calls, short the puts), so treat it as strong evidence, not ground truth.</li>
+ <li><b>Walls in practice:</b> short strikes parked ON a high-OI strike get a WALL flag on the card — walls are magnets, so shorts belong just BEYOND them, not on them.</li></ul></div></div>`;
+}
+
+function vannaView(){
+ // real BS delta curves: vanna = gap between IV15/IV25; charm = gap 30d/5d
+ const W=920,H=300,pl=55,pb=30,S0=6000;
+ function dcurve(T,iv,col,dash){let p="";for(let i=0;i<=100;i++){const s=S0*(0.9+0.2*i/100);
+  const d1=(Math.log(s/S0)+(0.04+iv*iv/2)*T)/(iv*Math.sqrt(T));
+  const del=normCdf(d1)-1;  // put delta
+  const x=pl+i/100*(W/2-pl-30),y=H-pb-(del+1)*(H-pb-30);
+  p+=(i?"L":"M")+x.toFixed(1)+","+y.toFixed(1);}
+  return `<path d="${p}" fill="none" stroke="${col}" stroke-width="2" ${dash?'stroke-dasharray="5 4"':''}/>`;}
+ function dcurve2(T,iv,col,dash){let p="";for(let i=0;i<=100;i++){const s=S0*(0.9+0.2*i/100);
+  const d1=(Math.log(s/S0)+(0.04+iv*iv/2)*T)/(iv*Math.sqrt(T));
+  const del=normCdf(d1)-1;
+  const x=W/2+30+i/100*(W/2-60),y=H-pb-(del+1)*(H-pb-30);
+  p+=(i?"L":"M")+x.toFixed(1)+","+y.toFixed(1);}
+  return `<path d="${p}" fill="none" stroke="${col}" stroke-width="2" ${dash?'stroke-dasharray="5 4"':''}/>`;}
+ return `<h1>Vanna &amp; Charm<span class="greek">how DELTA itself moves</span></h1>
+ <p class="lede">First-order greeks tell you how an option's price moves. Vanna and charm tell you how its DELTA moves — with volatility and with time. They matter because dealers hedge delta mechanically: when millions of deltas shift at once, the hedging flow moves the index.</p>
+ ${conceptSvg(
+  `<text x="${pl}" y="22" fill="var(--txt)" font-size="13" font-family="var(--mono)">VANNA: put delta vs spot at two IVs (30d)</text>`+
+  dcurve(30/365,0.25,"var(--red)",false)+dcurve(30/365,0.15,"var(--jade)",false)+
+  `<text x="${pl}" y="44" fill="var(--red)" font-size="11" font-family="var(--mono)">IV 25%</text>
+   <text x="${pl+70}" y="44" fill="var(--jade)" font-size="11" font-family="var(--mono)">IV 15%</text>
+   <text x="${pl}" y="${H-8}" fill="var(--mut)" font-size="11">IV falls → OTM put deltas shrink toward 0 → dealers short puts BUY BACK hedges → the post-event "vanna rally"</text>`+
+  `<text x="${W/2+30}" y="22" fill="var(--txt)" font-size="13" font-family="var(--mono)">CHARM: put delta vs spot, 30d vs 5d (same IV)</text>`+
+  dcurve2(30/365,0.18,"var(--mut)",true)+dcurve2(5/365,0.18,"var(--amber)",false)+
+  `<text x="${W/2+30}" y="44" fill="var(--mut)" font-size="11" font-family="var(--mono)">30 DTE</text>
+   <text x="${W/2+100}" y="44" fill="var(--amber)" font-size="11" font-family="var(--mono)">5 DTE</text>`,W,H)}
+ <div class="cols"><div class="col"><h3 class="setup">Vanna (∂Δ/∂vol)</h3><ul>
+ <li>Left panel, real Black-Scholes: same puts, two IVs. The gap between the curves IS vanna.</li>
+ <li>After an event passes and IV gets crushed, every OTM put's delta collapses toward zero. Dealers who were short those puts and short futures against them must <b>buy futures back</b> — mechanical buying that needs no news. That's why markets so often rally on vol crush, and why the BWB gets a "vanna tailwind" line in elevated vol.</li></ul></div>
+ <div class="col"><h3 class="manage">Charm (∂Δ/∂time)</h3><ul>
+ <li>Right panel: same IV, the delta curve steepens as expiry nears — OTM deltas bleed to zero day by day.</li>
+ <li>Into monthly OpEx, that daily bleed forces dealers to unwind hedges on a schedule → the gentle pre-OpEx drift and pinning. The flows VANISH the week after — which is exactly the post-OpEx vol-expansion warning in the gates.</li></ul></div></div>`;
+}
+
+function fwdView(){
+ const W=920,H=280;
+ return `<h1>Forward Vol<span class="greek">the vol you actually trade in a calendar</span></h1>
+ <p class="lede">An expiry's IV prices ALL the time from today until that date. Variance — IV² × time — stacks like bricks. The implied vol for just the window BETWEEN two expiries is the forward vol, and a calendar spread is, mechanically, a trade on it.</p>
+ ${conceptSvg(`
+  <rect x="60" y="60" width="280" height="56" fill="var(--jade)" fill-opacity=".25" stroke="var(--jade)"/>
+  <text x="200" y="93" fill="var(--txt)" font-size="12" font-family="var(--mono)" text-anchor="middle">front: σ₁² × T₁</text>
+  <rect x="60" y="150" width="280" height="56" fill="var(--jade)" fill-opacity=".25" stroke="var(--jade)"/>
+  <rect x="340" y="150" width="320" height="56" fill="var(--amber)" fill-opacity=".25" stroke="var(--amber)"/>
+  <text x="200" y="183" fill="var(--txt)" font-size="12" font-family="var(--mono)" text-anchor="middle">same σ₁² × T₁</text>
+  <text x="500" y="183" fill="var(--amber)" font-size="12" font-family="var(--mono)" text-anchor="middle">FORWARD variance = σf² × (T₂−T₁)</text>
+  <text x="700" y="183" fill="var(--mut)" font-size="11" font-family="var(--mono)">← back: σ₂² × T₂ (whole bar)</text>
+  <line x1="340" y1="40" x2="340" y2="226" stroke="#fff" stroke-opacity=".25" stroke-dasharray="4 4"/>
+  <line x1="660" y1="130" x2="660" y2="226" stroke="#fff" stroke-opacity=".25" stroke-dasharray="4 4"/>
+  <text x="340" y="246" fill="var(--mut)" font-size="11" font-family="var(--mono)" text-anchor="middle">front expiry T₁</text>
+  <text x="660" y="246" fill="var(--mut)" font-size="11" font-family="var(--mono)" text-anchor="middle">back expiry T₂</text>
+  <text x="60" y="36" fill="var(--txt)" font-size="13" font-family="var(--mono)">σf = √( (σ₂²T₂ − σ₁²T₁) / (T₂ − T₁) )</text>`,W,H)}
+ <div class="cols"><div class="col"><h3 class="setup">Why a calendar = forward vol</h3><ul>
+ <li>Sell the front (collect σ₁ for the first window) + buy the back (pay σ₂ for the whole bar). Net, you've paid for only the amber block: the forward window.</li>
+ <li><b>Edge = front IV − forward vol.</b> Positive: the leg you sell is rich relative to the window you buy. That single number ranks every pair in the app's table and the console's expiry row.</li>
+ <li>Two expiries can both look "cheap" or "rich" in isolation while the forward between them is the opposite — which is why eyeballing the term curve misleads and the subtraction doesn't.</li></ul></div>
+ <div class="col"><h3 class="manage">Reading it</h3><ul>
+ <li>Steep contango pushes forward vol ABOVE the front IV → negative calendar edge even though "back vega is cheap". The engine catches this.</li>
+ <li>Inverted front (front IV above 30d) almost always means positive edge — selling the expensive brick.</li>
+ <li>Curve-level forward vol is the candidate; the chain-level price is the confirmation. Always both.</li></ul></div></div>`;
+}
+
+function kinkView(){
+ const W=920,H=300,pl=55,pb=34;
+ const dtes=[7,14,21,28,35,42,49],evt=21;
+ const X=d=>pl+(d-5)/47*(W-pl-20);
+ const Y=v=>H-pb-(v-13)/7*(H-pb-40);
+ let base="",kinked="",dots="";
+ dtes.forEach((d,i)=>{
+  const b=14+1.8*Math.sqrt(d/30);
+  const k=b+(d>=evt?1.6*Math.exp(-(d-evt)/14):0);
+  base+=(i?"L":"M")+X(d)+","+Y(b);kinked+=(i?"L":"M")+X(d)+","+Y(k);
+  dots+=`<circle cx="${X(d)}" cy="${Y(k)}" r="3" fill="var(--amber)"/>`;});
+ return `<h1>Event Kinks<span class="greek">FOMC priced into the curve</span></h1>
+ <p class="lede">A scheduled binary event (FOMC, CPI) adds a known lump of variance to every expiry that contains it. The first expiry AFTER the event jumps in IV versus the one just before — a visible kink in the term structure.</p>
+ ${conceptSvg(axis(W,H,pl,pb)+
+  `<path d="${base}" fill="none" stroke="var(--mut)" stroke-width="1.5" stroke-dasharray="5 4"/>
+   <path d="${kinked}" fill="none" stroke="var(--amber)" stroke-width="2.2"/>${dots}
+   <line x1="${X(evt)}" y1="24" x2="${X(evt)}" y2="${H-pb}" stroke="var(--red)" stroke-opacity=".55" stroke-dasharray="4 4"/>
+   <text x="${X(evt)}" y="18" fill="var(--red)" font-size="12" font-family="var(--mono)" text-anchor="middle">FOMC</text>
+   <text x="${X(35)}" y="${Y(17.4)}" fill="var(--amber)" font-size="11" font-family="var(--mono)">actual curve (kinked)</text>
+   <text x="${X(38)}" y="${Y(15.2)}" fill="var(--mut)" font-size="11" font-family="var(--mono)">no-event curve</text>
+   <text x="${W-14}" y="${H-10}" fill="var(--mut)" font-size="11" font-family="var(--mono)" text-anchor="end">DTE →</text>`,W,H)}
+ <div class="cols"><div class="col"><h3 class="setup">Trading the kink</h3><ul>
+ <li><b>Sell the kink (good):</b> calendar whose FRONT expiry sits just after the event — you sell the inflated brick and buy a calmer back. Only when the event premium is genuinely rich: the app computes the implied FOMC-day move from the IV step across the event (variance of the post-event expiry minus pre-event expiry, minus an RV21 baseline for the ordinary days between) and requires it ≥ <b>1.25×</b> the historical ~0.9% FOMC-day move.</li>
+ <li><b>EVENT CAL is its own animal:</b> it fires even when VRP is mildly negative (floor −1.5v), its front leg may be well under 12 DTE, and the 7-DTE front-exit rule is waived — because the event IS the trade. Hold 1–2 sessions past the print, then out. The card label and rationale say so explicitly so it's never managed like a normal calendar.</li>
+ <li><b>Own the kink in the back only (bad):</b> front expires BEFORE the event, back contains it — you've paid for event variance you never get to sell. The app deletes these pairs before you see them.</li></ul></div>
+ <div class="col"><h3 class="manage">Spotting it</h3><ul>
+ <li>Console: the "K" gate fires on a z-spike in the 9d/30d ratio — event premium loading the front, even for events not in the FOMC calendar (CPI, NFP).</li>
+ <li>App pair table: <code>fomc_in_front</code> flags the harvest candidates explicitly.</li>
+ <li>The kink is also why simple "term slope" reads mislead near events — slope between two kinked points isn't carry, it's the event.</li></ul></div></div>`;
+}
+const CONCEPTS={c_vrp:vrpView,c_gex:gexView,c_vanna:vannaView,c_fwd:fwdView,c_kink:kinkView};
+
+/* ============================ views ============================ */
+function fmt(x,d=2){return (x>=0?"+":"")+x.toFixed(d);}
+function metricsFor(legs,el,ivS,frontDte){
+  const entry=val(SPOT,legs,0,0);
+  let maxP=-1e9,maxL=1e9,bes=[],prev=null;
+  for(let S=SPOT*.84;S<=SPOT*1.16;S+=2){
+    const p=val(S,legs,frontDte,0)-entry;
+    if(p>maxP)maxP=p; if(p<maxL)maxL=p;
+    if(prev!==null&&((prev<0&&p>=0)||(prev>=0&&p<0)))bes.push(Math.round(S));
+    prev=p;}
+  return{entry,maxP,maxL,bes,now:val(SPOT,legs,el,ivS)-entry};}
+
+function drawGraph(id,legs,el,ivS,maxEl){
+  const W=920,H=340,padL=58,padR=16,padT=14,padB=30;
+  const entry=val(SPOT,legs,0,0);
+  const xs=[],exp=[],tnow=[];
+  for(let S=SPOT*.88;S<=SPOT*1.12;S+=3){xs.push(S);
+    exp.push(val(S,legs,maxEl,0)-entry);
+    tnow.push(val(S,legs,el,ivS)-entry);}
+  const ymax=Math.max(...exp,...tnow,1),ymin=Math.min(...exp,...tnow,-1);
+  const X=s=>padL+(s-xs[0])/(xs[xs.length-1]-xs[0])*(W-padL-padR);
+  const Y=p=>padT+(ymax-p)/(ymax-ymin)*(H-padT-padB);
+  const path=a=>a.map((p,i)=>(i?"L":"M")+X(xs[i]).toFixed(1)+","+Y(p).toFixed(1)).join(" ");
+  // split expiry into pos/neg segments for fill colors
+  let segs="";
+  for(let i=1;i<xs.length;i++){
+    const c=(exp[i-1]+exp[i])/2>=0?"var(--jade)":"var(--red)";
+    segs+=`<line x1="${X(xs[i-1])}" y1="${Y(exp[i-1])}" x2="${X(xs[i])}" y2="${Y(exp[i])}" stroke="${c}" stroke-width="2.2"/>`;}
+  const grid=[.92,.96,1,1.04,1.08].map(m=>{const s=SPOT*m;
+    return `<line x1="${X(s)}" y1="${padT}" x2="${X(s)}" y2="${H-padB}" stroke="var(--line)" stroke-width="1" ${m===1?'stroke-dasharray="0"':'stroke-dasharray="3 4"'}/>
+    <text x="${X(s)}" y="${H-10}" fill="var(--mut)" font-size="10" font-family="var(--mono)" text-anchor="middle">${Math.round(s)}</text>`;}).join("");
+  const yticks=[ymax,ymax/2,0,ymin/2,ymin].map(p=>
+    `<line x1="${padL}" y1="${Y(p)}" x2="${W-padR}" y2="${Y(p)}" stroke="var(--line)" stroke-width="${Math.abs(p)<.01?1.6:0.6}"/>
+     <text x="${padL-6}" y="${Y(p)+3}" fill="var(--mut)" font-size="10" font-family="var(--mono)" text-anchor="end">${p.toFixed(0)}</text>`).join("");
+  return `<svg id="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Risk graph">
+    ${grid}${yticks}${segs}
+    <path d="${path(tnow)}" fill="none" stroke="var(--amber)" stroke-width="1.8" stroke-dasharray="6 4"/>
+    <line id="xh" x1="-10" y1="${padT}" x2="-10" y2="${H-padB}" stroke="#fff" stroke-opacity=".25"/>
+    <text x="${W-padR}" y="${padT+10}" fill="var(--jade)" font-size="11" font-family="var(--mono)" text-anchor="end">— at front expiry (T+${maxEl})</text>
+    <text x="${W-padR}" y="${padT+24}" fill="var(--amber)" font-size="11" font-family="var(--mono)" text-anchor="end">- - T+${el}${ivS?` · IV ${fmt(ivS*100,0)}pt`:""}</text>
+  </svg>`;}
+
+function stratView(key){
+  const s=STRATS[key];
+  return `
+  <h1>${s.name}<span class="greek">${s.greek}</span></h1>
+  <p class="lede">${s.lede}</p>
+  <div class="console-strip"><b>Console picks this when</b>${s.console}</div>
+  <div class="graphwrap">
+    <div id="g"></div>
+    <div class="controls">
+      <div class="ctl"><label>Days elapsed (T+x line)</label>
+        <input type="range" id="el" min="0" max="${s.maxEl}" value="0" step="1"><output id="elo">0</output></div>
+      <div class="ctl"><label>IV shift, vol pts (crush ⟷ spike)</label>
+        <input type="range" id="iv" min="-8" max="8" value="0" step="1"><output id="ivo">0</output></div>
+    </div>
+    <div class="readout" id="ro">hover the graph for price-level P&amp;L</div>
+    <div class="metrics" id="mx"></div>
+  </div>
+  <div class="note"><h3>Entry Greeks — targets &amp; levers (per 1-lot)</h3>
+  <table class="mx"><tr><th>Greek / metric</th><th>Target at entry</th><th>If off-target, adjust…</th></tr>
+  ${(TARGETS[key]||[]).map(t=>`<tr><td class="s">${t[0]}</td><td>${t[1]}</td><td style="color:var(--mut)">${t[2]}</td></tr>`).join("")}</table>
+  <p style="margin-top:8px;color:var(--mut);font-size:12px">${GAMMA_TEST}</p></div>
+  <div class="cols">
+    <div class="col"><h3 class="setup">Setup</h3><ul>${s.setup.map(x=>`<li>${x}</li>`).join("")}</ul></div>
+    <div class="col"><h3 class="manage">Manage</h3><ul>${s.manage.map(x=>`<li>${x}</li>`).join("")}</ul></div>
+  </div>
+  <div class="greeksline">Model: Black-Scholes, r=4%, SPX≈6000, illustrative skewed IVs. Shapes and behavior are exact;
+  <b>absolute numbers are illustrative — price your actual strikes on the chain.</b>
+  Legs: ${s.legs.map(l=>`${l.qty>0?"+":""}${l.qty} ${l.K}${l.cp} ${l.dte}d`).join(" · ")}</div>`;}
+
+function renderStrat(key){
+  const s=STRATS[key];
+  document.getElementById("main").innerHTML=stratView(key);
+  const upd=()=>{
+    const el=+document.getElementById("el").value, ivS=+document.getElementById("iv").value/100;
+    document.getElementById("elo").textContent=el;
+    document.getElementById("ivo").textContent=fmt(ivS*100,0);
+    document.getElementById("g").innerHTML=drawGraph("svgG",s.legs,el,ivS,s.maxEl);
+    const m=metricsFor(s.legs,el,ivS,s.maxEl);
+    const ec=m.entry>0?`debit ${m.entry.toFixed(2)}`:`credit ${(-m.entry).toFixed(2)}`;
+    document.getElementById("mx").innerHTML=`
+      <div class="metric"><div class="k">Entry</div><div class="v amb">${ec}</div></div>
+      <div class="metric"><div class="k">Max P (front exp)</div><div class="v pos">${fmt(m.maxP)}</div></div>
+      <div class="metric"><div class="k">Max L (front exp)</div><div class="v neg">${fmt(m.maxL)}</div></div>
+      <div class="metric"><div class="k">Breakevens</div><div class="v">${m.bes.join(" / ")||"—"}</div></div>
+      <div class="metric"><div class="k">P&amp;L at spot, T+${el}</div><div class="v ${m.now>=0?"pos":"neg"}">${fmt(m.now)}</div></div>`;
+    hookHover(s,el,ivS);};
+  document.getElementById("el").addEventListener("input",upd);
+  document.getElementById("iv").addEventListener("input",upd);
+  upd();}
+
+function hookHover(s,el,ivS){
+  const svg=document.getElementById("svgG"); if(!svg)return;
+  const entry=val(SPOT,s.legs,0,0);
+  svg.addEventListener("mousemove",e=>{
+    const r=svg.getBoundingClientRect();
+    const fx=(e.clientX-r.left)/r.width*920;
+    const lo=SPOT*.88,hi=SPOT*1.12,padL=58,padR=16;
+    const S=lo+(fx-padL)/(920-padL-padR)*(hi-lo);
+    if(S<lo||S>hi)return;
+    const xh=svg.getElementById?svg.getElementById("xh"):svg.querySelector("#xh");
+    if(xh){xh.setAttribute("x1",fx);xh.setAttribute("x2",fx);}
+    const pe=val(S,s.legs,s.maxEl,0)-entry;
+    const pn=val(S,s.legs,el,ivS)-entry;
+    document.getElementById("ro").textContent=
+      `S=${S.toFixed(0)}  ·  expiry ${fmt(pe)}  ·  T+${el} ${fmt(pn)}`;});}
+
+/* ---- matrix & EM views ---- */
+const MATRIX=`
+ <h1>Regime → Strategy Matrix</h1>
+ <p class="lede">Exactly the decision tree TE Console v2.2 runs each session, in priority order — the first row that matches wins. Click any strategy in the rail for its risk graph and rules.</p>
+ <table class="mx"><tr><th>#</th><th>Condition (console rows)</th><th>Strategy</th><th>Why</th></tr>
+ <tr><td>1</td><td>VIX spike gate · −γ + elevated · STRESSED vol</td><td class="s">NO NEW TRADES</td><td>Surface unsettled or tape amplifying — edge can't be priced.</td></tr>
+ <tr><td>2</td><td>Stability = UNSTABLE (−γ), vol not stressed</td><td class="s">Put BWB · half size</td><td>Only defined-risk, skew-financed structure tolerable when moves get amplified.</td></tr>
+ <tr><td>3</td><td>Premium row red (VRP ≤ 0)</td><td class="s">NO PREMIUM SELLING</td><td>Realized &gt; implied: sellers underpaid. Debit calendar only while the curve is in contango — <b>except</b> the FOMC harvest: front inverted by an event kink + FOMC ≤ 21d + implied event move ≥ 1.25× the historical ~0.9% + VRP no worse than −1.5v → sell the kinked front (EVENT CAL, half size, exit 1–2 sessions after the print).</td></tr>
+ <tr><td>4</td><td>OpEx week · range · +γ</td><td class="s">Pin butterfly</td><td>Charm/gamma pinning window — cheap convexity at the magnet strike.</td></tr>
+ <tr><td>5</td><td>Elevated vol (pctl 60–85)</td><td class="s">Put BWB</td><td>Rich skew finances wings; vol crush + vanna work for you.</td></tr>
+ <tr><td>6</td><td>Normal vol · rangebound</td><td class="s">Iron condor <span style="color:var(--mut)">(alt: OTM fly)</span></td><td>Classic overpriced-range rent collection.</td></tr>
+ <tr><td>7</td><td>Calm vol · range · CHEAP FWD/FLAT curve</td><td class="s">Calendar <span style="color:var(--mut)">(alt: double cal)</span></td><td>Back vega at the lows + front theta differential.</td></tr>
+ <tr><td>8</td><td>Calm vol · trending</td><td class="s">Diagonal (trend side)</td><td>Cheap vega + theta + directional participation.</td></tr>
+ <tr><td>9</td><td>Curve = FRONT RICH (inverted)</td><td class="s">Calendar — sell rich front</td><td>Short-dated IV above 30d: sell the expensive leg, any regime.</td></tr>
+ <tr><td>10</td><td>Nothing matches</td><td class="s">MARGINAL — skip</td><td>Capital preserved is edge too.</td></tr></table>
+ <div class="note"><h3>Universal rules (all strategies)</h3><ul>
+ <li>Hold 5–10 days. Any short front leg exits/rolls before <b>7 DTE</b>.</li>
+ <li>Execute <b>15:00–15:40 ET</b> only. Start at mid, walk in increments, <b>3 reprices max</b>, never work orders into the MOC window.</li>
+ <li>FOMC inside a leg you're SELLING: only when that leg is visibly rich. FOMC inside a leg you're BUYING (back-only): never — the expiry engine filters these.</li>
+ <li>ETF wrappers (SPY/QQQ/IWM): no short ITM calls through ex-div week; prefer SPX/RUT when any leg may go ITM.</li>
+ <li><b>Entry cadence (now enforced — gate "W"):</b> Monday close is the default entry day (one weekend of gap risk, post-weekend re-marked IVs). On Fridays the app filters the family list to net-debit long-vega structures only (calendar / double calendar / diagonal — the event harvest passes naturally); everything else waits for Monday. A gated day means capital carried, not deployed.</li>
+ <li><b>One book, not three:</b> SPX/QQQ/RUT positions correlate 0.8–0.9 — risk budgets (net vega, delta band, theta floor) apply to the combined book, scaled per $100k of account NLV. The app's fit score enforces this; a long-vega book makes the next short-vega idea score higher.</li>
+ <li><b>Layering discipline:</b> max 3 structures per ticker. Every added layer passes the same fresh entry gates as a new trade. Any layer whose purpose is repairing an existing one is an adjustment and must <b>reduce</b> book risk, not add premium.</li></ul></div>
+ <div class="note"><h3>Workflow — which tool does what</h3>
+ <ul><li><b>TE Console (TradingView):</b> chart-side context read — regime, verdict, warnings.</li>
+ <li><b>Selection app:</b> per-ticker, per-account shortlist (top-2 families × 2 candidates). Live scans reprice every card from the actual NBBO with TWS greeks (model kept alongside for comparison), ladder OI for walls/pin/GEX-sign, run whatIf margin, and stage the untransmitted combo to TWS. Each card links its exact legs to OptionStrat for out-of-hours modelling. Book greeks and budgets are <b>campaign-scoped</b> (legs ≤ 60 DTE; the long-DTE campaign is excluded and counted separately), while the <b>stress row</b> — −5%/IV+10/2d, −2%/+4/1d, +3%/−3/2d — reprices the FULL book including long-DTE, because survival math only makes sense on everything held. Benchmark: a healthy book loses no more than 2–4 weeks of P&amp;L on the first scenario. The app's regime engine is authoritative when it and the console disagree on a borderline day.</li>
+ <li><b>TWS:</b> review the staged order, work the fill — mid, walk in, 3 reprices max, 15:00–15:40 ET.</li>
+ <li><b>OptionNet Explorer:</b> all ongoing position management. <b>OptionStrat:</b> out-of-hours modelling.</li></ul></div>`;
+
+const EMVIEW=`
+ <h1>Using Expected Moves<span class="greek">the cone on your chart</span></h1>
+ <p class="lede">The dotted cone is ±1σ for your hold horizon: spot × RV21 × √(hold days / 252). One number, four jobs.</p>
+ <div class="cols">
+ <div class="col"><h3 class="setup">Placement</h3><ul>
+ <li><b>Condor short strikes:</b> at or outside the cone edges. Inside = selling strikes the math expects to get hit.</li>
+ <li><b>BWB / OTM fly body:</b> at the lower cone edge — where a normal down-move lands.</li>
+ <li><b>Double calendar strikes:</b> the two cone edges, so the tent covers the probable range.</li>
+ <li><b>Diagonal short leg:</b> beyond the cone in the trend direction — a normal trend day shouldn't run it over.</li></ul></div>
+ <div class="col"><h3 class="manage">Judgement</h3><ul>
+ <li><b>Adjustment tripwire:</b> price tagging a cone edge mid-hold = mandatory position review, not optional.</li>
+ <li><b>Debit sanity:</b> a calendar debit &gt; ~40% of one cone half-width = overpaying for the tent.</li>
+ <li><b>VRP, spatially:</b> the cone is REALIZED vol. Strikes the options market prices at ±1σ sitting well outside your cone = implied &gt; realized = the Premium row's green, drawn on the chart.</li>
+ <li><b>Breakeven test:</b> any premium-selling structure whose breakevens sit INSIDE the cone needs a directional reason to exist.</li></ul></div></div>
+ <div class="note"><h3>Caveat</h3>It's built from realized vol and assumes normal-ish moves — it will understate gap risk around events and in −γ tape. That's what the Warnings row is for.</div>`;
+
+/* ---- router ---- */
+function show(v){
+  document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  if(v==="matrix")document.getElementById("main").innerHTML=MATRIX;
+  else if(v==="em")document.getElementById("main").innerHTML=EMVIEW;
+  else if(CONCEPTS[v])document.getElementById("main").innerHTML=CONCEPTS[v]();
+  else renderStrat(v);
+  window.scrollTo({top:0});}
+document.getElementById("nav").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(b)show(b.dataset.v);});
+show("matrix");
+</script>
+</body>
+</html>
