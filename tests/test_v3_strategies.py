@@ -14,14 +14,15 @@ def _ctx(account="MOCK-B", nlv=100_000):
 
 def test_new_strategy_factories_registered_and_construct():
     keys = {"balanced_fly", "iron_fly", "otm_put_fly", "call_bwb",
-            "m3_bwb_call", "target_fly"}
+            "m3_bwb_call", "target_fly", "debit_spread"}
     assert keys <= set(REGISTRY)
     ctx = _ctx()
-    for key in keys - {"target_fly"}:
+    for key in keys - {"target_fly", "debit_spread"}:
         cards = REGISTRY[key].propose(ctx)
         assert cards, key
         assert all(c.legs and c.cash_required is not None for c in cards)
     assert REGISTRY["target_fly"].propose_for_bias(ctx, 1)
+    assert REGISTRY["debit_spread"].propose_for_bias(ctx, -1)
 
 
 def test_m3_is_same_expiry_and_has_itm_call():
@@ -62,7 +63,15 @@ def test_strategy_lab_cash_and_margin_mandates():
     assert not cash_keys & {"calendar", "double_calendar", "diagonal"}
     assert {"calendar", "double_calendar", "diagonal"} <= margin_keys
     assert {"balanced_fly", "iron_fly", "otm_put_fly", "call_bwb",
-            "m3_bwb_call", "target_fly"} <= cash_keys
+            "m3_bwb_call"} <= cash_keys
+    assert "target_fly" not in cash_keys and "debit_spread" not in cash_keys
+
+
+def test_expanded_lab_uses_edge_rank_not_alphabetical_order():
+    cards = strategy_lab(_ctx("MOCK-A", 250_000), "bull", "MOCK-A", 250_000)["cards"]
+    assert [c["rank_score"] for c in cards] == sorted(
+        [c["rank_score"] for c in cards], reverse=True)
+    assert [c["rank"] for c in cards] == list(range(1, len(cards) + 1))
 
 
 def test_hypothesis_cards_are_manual_testable_not_live_approved():

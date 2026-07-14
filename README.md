@@ -7,7 +7,8 @@ generates **2 concrete candidates each**, and stages the chosen combo to
 TWS (`transmit=False`, whatIf margin first).
 
 Campaign Engine v3 adds executable chat-derived single-expiry strategies,
-an OptionNet testing laboratory, signed portfolio-governor checks, immutable
+a historical matched-date OptionNet testing laboratory, one conditional
+cross-strategy ranker, signed portfolio-governor checks, immutable
 server-side candidates, campaign journaling, management advice, and manual
 evidence capture. Open `/campaigns` for the v3 workflow. Hypothesis strategies
 remain test-only until manual/paper evidence supports promotion.

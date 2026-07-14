@@ -60,9 +60,12 @@ def evaluate_candidate(card: dict, book: dict | None, nlv: float | None,
           for k in before}
     structural = abs(float(card.get("max_loss", 0.0) or 0.0)) * 100
     cash = float(card.get("cash_required") or structural)
-    risk_pct = (cfg["limits"]["target_fly_risk_pct_nlv"]
-                if card.get("strategy") == "target_fly"
-                else cfg["limits"]["max_campaign_risk_pct_nlv"])
+    if card.get("strategy") == "target_fly":
+        risk_pct = cfg["limits"]["target_fly_risk_pct_nlv"]
+    elif card.get("strategy") == "debit_spread":
+        risk_pct = cfg["limits"]["directional_debit_risk_pct_nlv"]
+    else:
+        risk_pct = cfg["limits"]["max_campaign_risk_pct_nlv"]
     size_frac = {"FULL": 1.0, "HALF": .5, "QUARTER": .25, "STAND": 0.0}.get(size, 1.0)
     max_lots = int(cfg["limits"]["max_lots"] * size_frac)
     approved, binding = 0, []

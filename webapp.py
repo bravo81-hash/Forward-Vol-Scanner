@@ -171,7 +171,8 @@ def api_smsf():
     return jsonify(out)
 
 
-def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None):
+def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None,
+                as_of: date | None = None, manual: dict | None = None):
     """Build a v3 context with one central mandate and optional live book."""
     from config.loader import account_profile
     from core.chain import MOCK, SURFACE_CFG
@@ -189,7 +190,10 @@ def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None):
         if source == "live" and symbol not in SURFACE_CFG:
             continue
         try:
-            ctx = build_context_yf(symbol) if source == "yf" else build_context(symbol, source)
+            if (as_of or manual) and source != "mock":
+                raise ValueError("historical ONE sessions use manual/mock mode, not live/yfinance")
+            ctx = (build_context_yf(symbol) if source == "yf" else
+                   build_context(symbol, source, today=as_of, manual=manual))
             break
         except Exception as exc:                 # noqa: BLE001
             errors.append(f"{source}: {exc}")
@@ -208,6 +212,13 @@ def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None):
     return ctx, profile, errors
 
 
+@app.get("/api/v3/defaults")
+def api_v3_defaults():
+    """Trading-session defaults use New York, not the browser's local date."""
+    return jsonify({"entry_date": trading_today().isoformat(), "entry_time": "15:30",
+                    "timezone": "America/New_York"})
+
+
 @app.get("/api/v3/opportunities")
 def api_v3_opportunities():
     """Executable Gate S candidates for mock/ONE testing and later paper use."""
@@ -224,7 +235,8 @@ def api_v3_opportunities():
     if intent not in ("auto", "bull", "neutral", "bear"):
         return jsonify({"error": "intent must be auto, bull, neutral, or bear"}), 400
     try:
-        ctx, profile, errors = _v3_context(symbol, mode, account, nlv)
+        as_of, manual = _manual_one_context(intent)
+        ctx, profile, errors = _v3_context(symbol, mode, account, nlv, as_of, manual)
         out = (strategy_lab(ctx, intent, account, profile["nlv"]) if lab
                else campaign_shortlist(ctx, intent, account, profile["nlv"]))
         out["symbol"], out["spot"], out["book"] = symbol, ctx.spot, ctx.book
@@ -240,8 +252,60 @@ def api_v3_opportunities():
         log("v3_opportunities", symbol, {"account": account, "intent": intent,
                                          "cards": len(out["cards"])})
         return jsonify(out)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     except Exception as exc:                     # noqa: BLE001
         return jsonify({"error": str(exc)}), 500
+
+
+def _manual_one_context(intent: str) -> tuple[date | None, dict | None]:
+    """Validate optional market-state fields copied from one historical ONE date."""
+    raw = request.args.get("entry_date")
+    if not raw:
+        return None, None
+    try:
+        as_of = date.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError("entry_date must be YYYY-MM-DD") from exc
+    if as_of > trading_today():
+        raise ValueError("entry_date cannot be in the future")
+    if as_of.weekday() > 4:
+        raise ValueError("entry_date must be a trading weekday")
+    as_of_time = request.args.get("entry_time", "15:30")
+    try:
+        hh, mm = (int(x) for x in as_of_time.split(":"))
+    except (ValueError, TypeError) as exc:
+        raise ValueError("entry_time must be HH:MM New York time") from exc
+    if not (15 * 60 <= hh * 60 + mm <= 15 * 60 + 40):
+        raise ValueError("entry_time must be inside your 15:00-15:40 ET decision window")
+
+    def number(name: str, default: float, lo: float, hi: float) -> float:
+        value = request.args.get(name, default=default, type=float)
+        if value is None or not lo <= value <= hi:
+            raise ValueError(f"{name} must be between {lo:g} and {hi:g}")
+        return float(value)
+
+    iv_band = request.args.get("iv_band", "NRM").upper()
+    term = request.args.get("term", "FLAT").upper()
+    trend = request.args.get("trend", "RNG").upper()
+    event = request.args.get("event", "NONE").upper()
+    if iv_band not in {"CMP", "NRM", "ELV", "STR"}:
+        raise ValueError("iv_band must be CMP, NRM, ELV, or STR")
+    if term not in {"STEEP CONTANGO", "CONTANGO", "FLAT", "INVERTED FRONT"}:
+        raise ValueError("invalid term state")
+    if trend not in {"UP", "RNG", "DN"}:
+        raise ValueError("trend must be UP, RNG, or DN")
+    if event not in {"NONE", "FOMC", "MACRO", "OPEX"}:
+        raise ValueError("event must be NONE, FOMC, MACRO, or OPEX")
+    bias = {"bull": 1, "neutral": 0, "bear": -1}.get(intent, 0)
+    return as_of, {"historical": True, "as_of_time": as_of_time,
+                   "spot": number("spot", 6000, 1, 100000),
+                   "iv30": number("iv30", 20, 1, 150),
+                   "rv21": number("rv21", 16, 1, 150),
+                   "vrp_fwd": number("vrp_fwd", 4, -100, 100),
+                   "rr25_30d": number("rr25", 4, -50, 50),
+                   "iv_band": iv_band, "term": term, "trend": trend,
+                   "event": event, "bias": bias}
 
 
 @app.get("/api/v3/candidates/<candidate_id>")

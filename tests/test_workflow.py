@@ -81,7 +81,7 @@ def test_management_plan_credit_structure():
     assert m["basis"] == "credit"
     assert m["pt_dollars"] == 100 and m["sl_dollars"] == -300   # 0.5*2*100 ; max(-400,-300 floor)
     assert len(m["triggers"]) == 2 and all(0 <= t["p_touch_pct"] <= 100 for t in m["triggers"])
-    assert m["time_stop"]["exit_in_days"] == 30 - 7
+    assert m["time_stop"]["exit_in_days"] == 10
 
 
 def test_management_plan_debit_calendar():

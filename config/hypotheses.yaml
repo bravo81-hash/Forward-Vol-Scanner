@@ -248,3 +248,19 @@ hypotheses:
       - total_loss_rate
     promote_when: "Target selection and timing show repeatable value after debit and slippage."
     reject_when: "Results are indistinguishable from low-probability lottery exposure."
+
+  - id: H014
+    name: directional_debit_spread_defensive_row
+    status: HYPOTHESIS
+    claim: "A same-expiry directional debit spread is preferable to opening new carry exposure when forward VRP is negative or the surface is inverted."
+    current_rule: "30-60 DTE, risk no more than 0.5% NLV, compare entry use and debit-only repairs with closing"
+    evidence_required:
+      - manual_optionnet_explorer_test
+      - paper_tws_campaign
+    metrics:
+      - reward_to_debit
+      - realised_return
+      - drawdown
+      - adjustment_value
+    promote_when: "Matched-date tests beat standing aside or new carry without unacceptable debit decay."
+    reject_when: "Directional errors and decay overwhelm the defined-risk benefit."

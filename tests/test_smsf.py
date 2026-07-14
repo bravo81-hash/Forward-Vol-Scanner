@@ -77,10 +77,10 @@ def test_backwardation_degross_overrides_all_rows():
     for vs, sk in (("NRM", True), ("ELV", False), ("CMP", False)):
         ctx = mk_ctx(vol_state=vs, skew_rich=sk, term_verdict="INVERTED FRONT")
         order, notes = gate_s(ctx, 0)
-        assert order[0][0] in ("iron_fly", "target_fly")
+        assert order[0][0] == "target_fly"
         assert any("INVERTED" in n or "stress" in n.lower() for n in notes)
     out = smsf_verdict(mk_ctx(term_verdict="INVERTED FRONT"), "neutral")
-    assert "DE-GROSS" in out["action"]
+    assert "ZERO NEW CARRY" in out["action"]
 
 
 # ------------------------------------------------------------- verdict -----

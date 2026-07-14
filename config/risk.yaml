@@ -9,6 +9,7 @@ per_100k:
 limits:
   max_campaign_risk_pct_nlv: 0.02
   target_fly_risk_pct_nlv: 0.0025
+  directional_debit_risk_pct_nlv: 0.005
   max_campaign_cash_pct_nlv: 0.10
   max_stress_loss_pct_nlv: 0.04
   max_lots: 20

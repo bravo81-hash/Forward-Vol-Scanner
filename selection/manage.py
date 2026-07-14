@@ -21,6 +21,13 @@ from core.pricing import MULT, struct_value
 
 HOLD_MAX = 10
 FRONT_EXIT_DTE = 7
+FAMILY_EXIT_DTE = {
+    "bwb": 35, "m3_bwb_call": 35,
+    "balanced_fly": 21, "otm_put_fly": 21, "iron_fly": 14,
+    "condor": 14, "butterfly": 7, "call_bwb": 21,
+    "target_fly": 7, "debit_spread": 14,
+    "calendar": 7, "double_calendar": 7, "diagonal": 7,
+}
 
 # family -> (profit_target_frac, stop_frac, basis)
 #   credit basis: fracs are of credit received (PT 0.5 = buy back at half)
@@ -38,6 +45,7 @@ MGMT = {
     "call_bwb":        (0.12, 0.50, "debit"),
     "m3_bwb_call":     (0.12, 0.35, "debit"),
     "target_fly":      (1.00, 1.00, "debit"),
+    "debit_spread":    (0.75, 0.50, "debit"),
 }
 _DEFAULT = (0.50, 1.00, "credit")
 
@@ -109,7 +117,8 @@ def management_plan(ctx, s) -> dict:
 
     # ---- time stop ----
     fronts = [(l.expiry - ctx.today).days for l in s.legs if l.qty < 0]
-    exit_by = (min(fronts) - FRONT_EXIT_DTE) if fronts else None
+    exit_dte = FAMILY_EXIT_DTE.get(s.strategy, FRONT_EXIT_DTE)
+    exit_by = min(HOLD_MAX, max(min(fronts) - exit_dte, 0)) if fronts else HOLD_MAX
     exit_date = (ctx.today + timedelta(days=max(exit_by, 0))).isoformat() if exit_by is not None else None
 
     return {
@@ -118,5 +127,6 @@ def management_plan(ctx, s) -> dict:
         "t5_pnl": t5_pnl, "em5_pts": round(em5, 1),
         "triggers": triggers,
         "time_stop": {"exit_in_days": exit_by, "exit_by": exit_date,
-                      "rule": f"roll/close any short leg before {FRONT_EXIT_DTE} DTE"},
+                      "exit_dte": exit_dte,
+                      "rule": f"exit after {HOLD_MAX} days or before {exit_dte} DTE, whichever comes first"},
     }

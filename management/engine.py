@@ -47,6 +47,7 @@ def advise_campaign(campaign: dict, mark: dict, context: dict | None = None) -> 
         "otm_put_fly": ["close/recenter", "small call BWB on rally"],
         "call_bwb": ["close/reduce", "recenter call BWB"],
         "target_fly": ["close; no adjustment"],
+        "debit_spread": ["close/reduce", "roll only if the new debit improves defined risk"],
     }.get(family, ["close/reduce", "re-evaluate with fresh-entry gates"])
     return {"action": action, "reasons": reasons, "adjustments": adjustments,
             "stage_allowed": False, "policy_id": "campaign-management-v3",

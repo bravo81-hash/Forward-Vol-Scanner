@@ -84,6 +84,7 @@ class CampaignStore:
         now = time.time()
         material = {"symbol": symbol, "account": account, "mode": mode,
                     "policy": policy_id, "session": context.get("session"),
+                    "test_session_id": context.get("test_session_id"),
                     "spot": context.get("spot"), "legs": card.get("legs_raw"),
                     "net_mid": card.get("net_mid"), "rule": card.get("evidence")}
         cid = hashlib.sha256(_dump(material).encode()).hexdigest()[:24]

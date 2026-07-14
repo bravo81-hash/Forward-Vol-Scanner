@@ -24,7 +24,10 @@ def persist_cards(payload: dict, store: CampaignStore | None = None,
     context = {"session": payload.get("data", {}).get("session"),
                "fresh": payload.get("data", {}).get("fresh", False),
                "spot": payload.get("spot"), "regime": payload.get("inputs", {}),
-               "action": payload.get("action")}
+               "action": payload.get("action"),
+               "as_of_time": payload.get("data", {}).get("as_of_time"),
+               "historical": payload.get("data", {}).get("historical", False),
+               "test_session_id": payload.get("test_session_id")}
     for card in payload.get("cards", []):
         cid = store.save_candidate(payload["symbol"],
                                    (payload.get("account") or {}).get("account"),

@@ -40,6 +40,17 @@ def test_candidate_campaign_lifecycle_and_manual_test(tmp_path):
     assert store.evidence_summary()[0]["tests"] == 1
 
 
+def test_matched_session_context_survives_campaign_creation(tmp_path):
+    store = CampaignStore(tmp_path / "matched.sqlite")
+    payload = _payload()
+    payload["test_session_id"] = "ONE-ABC123"
+    payload["cards"][0]["test_session_id"] = "ONE-ABC123"
+    cid = persist_cards(payload, store)["cards"][0]["candidate_id"]
+    campaign = store.create_campaign(cid, test_mode="optionnet_matched_date")
+    assert campaign["card"]["test_session_id"] == "ONE-ABC123"
+    assert store.candidate(cid)["context"]["test_session_id"] == "ONE-ABC123"
+
+
 def test_candidate_quantity_and_expiry_enforced(tmp_path):
     store = CampaignStore(tmp_path / "v3.sqlite")
     payload = persist_cards(_payload(), store, ttl_seconds=1)

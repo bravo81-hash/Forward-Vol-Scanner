@@ -16,5 +16,5 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
-      - run: ruff check campaign config execution/candidates.py management portfolio/governor.py selection/lab.py selection/unified.py store/campaigns.py strategies/call_bwb.py strategies/fly_variants.py strategies/m3_bwb_call.py validation webapp.py tests/test_v3_*.py
+      - run: ruff check campaign config execution/candidates.py management portfolio/governor.py selection/campaign_ranker.py selection/lab.py selection/unified.py store/campaigns.py strategies/call_bwb.py strategies/debit_spread.py strategies/fly_variants.py strategies/m3_bwb_call.py validation webapp.py tests/test_v3_*.py
       - run: python -m compileall -q core strategies selection portfolio execution store management validation campaign config webapp.py
