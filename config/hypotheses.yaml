@@ -1,0 +1,234 @@
+version: 1
+updated: 2026-07-14
+
+statuses:
+  - HYPOTHESIS
+  - SHADOW
+  - PAPER
+  - ACTIVE
+  - REJECTED
+
+validation_policy:
+  automatic_order_transmission: false
+  historical_options_data_purchase: false
+  permitted_evidence:
+    - deterministic_math_test
+    - context_replay
+    - captured_tws_snapshot
+    - live_shadow_decision
+    - paper_tws_campaign
+    - manual_optionnet_explorer_test
+    - small_live_pilot_with_explicit_approval
+  rules:
+    - "Freeze the hypothesis and success metric before evaluation."
+    - "Use chronological or walk-forward separation where history exists."
+    - "Include bid/ask, commissions, and multi-leg execution sensitivity."
+    - "Report performance by underlying, regime, and structure."
+    - "Compare continuous deployment with conditional deployment and cash."
+    - "Missing historical option chains must be disclosed, not modelled as proof."
+    - "A rule may remain advisory indefinitely when evidence is insufficient."
+
+hypotheses:
+  - id: H001
+    name: rich_put_skew_subsidises_put_bwb
+    status: HYPOTHESIS
+    claim: "Rich downside skew improves put BWB expectancy after fills and tail risk."
+    current_rule: "put BWB is the default mid-IV, rich-skew income structure"
+    evidence_required:
+      - captured_tws_snapshot
+      - paper_tws_campaign
+      - manual_optionnet_explorer_test
+    metrics:
+      - expectancy_after_costs
+      - return_on_cash
+      - expected_shortfall
+      - max_drawdown
+    promote_when: "Consistent improvement versus balanced fly and unconditional BWB across multiple regimes."
+    reject_when: "Apparent entry subsidy is lost to fills, tail exposure, or unstable out-of-sample results."
+
+  - id: H002
+    name: rich_skew_threshold
+    status: HYPOTHESIS
+    claim: "rr25 greater than 30% of ATM IV is a useful rich-skew boundary."
+    current_rule: "rr25 / ATM IV > 0.30"
+    evidence_required:
+      - context_replay
+      - captured_tws_snapshot
+    metrics:
+      - threshold_stability
+      - candidate_quality_by_bucket
+      - parameter_sensitivity
+    promote_when: "A broad neighbourhood around the threshold is stable and improves candidate quality."
+    reject_when: "Results depend on a narrow threshold or differ materially by underlying without explicit calibration."
+
+  - id: H003
+    name: call_skew_bid_threshold
+    status: HYPOTHESIS
+    claim: "rr25 at or below -0.5 vol points identifies a useful call-skew-bid regime."
+    current_rule: "rr25 <= -0.5v"
+    evidence_required:
+      - context_replay
+      - captured_tws_snapshot
+      - manual_optionnet_explorer_test
+    metrics:
+      - event_frequency
+      - call_bwb_fill_quality
+      - expectancy_after_costs
+    promote_when: "The condition is repeatable and call-side structures outperform alternatives after costs."
+    reject_when: "The state is too rare, transient, or execution-dependent."
+
+  - id: H004
+    name: inverted_front_requires_degross
+    status: HYPOTHESIS
+    claim: "Inverted front term structure should suppress new short-gamma exposure and trigger de-gross review."
+    current_rule: "Gate S overrides all rows into a de-gross regime."
+    evidence_required:
+      - context_replay
+      - live_shadow_decision
+      - paper_tws_campaign
+    metrics:
+      - loss_avoidance
+      - false_positive_rate
+      - opportunity_cost
+      - stress_loss
+    promote_when: "De-grossing materially reduces tail loss without excessive false positives."
+    reject_when: "The term signal alone is insufficient; replace with a composite stress gate."
+
+  - id: H005
+    name: high_iv_steep_skew_prefers_wide_otm_put_fly
+    status: HYPOTHESIS
+    claim: "A wide OTM put fly is superior to a put BWB in high-IV, steep-skew conditions."
+    current_rule: "wide OTM put fly ranks first; size down 25-50%"
+    evidence_required:
+      - captured_tws_snapshot
+      - paper_tws_campaign
+      - manual_optionnet_explorer_test
+    metrics:
+      - return_on_cash
+      - tail_loss
+      - fill_quality
+      - target_hit_rate
+    promote_when: "Risk-adjusted results beat BWB and balanced-fly alternatives."
+    reject_when: "Tent placement or execution costs dominate the proposed skew advantage."
+
+  - id: H006
+    name: high_iv_flat_skew_prefers_iron_fly
+    status: HYPOTHESIS
+    claim: "Iron fly is preferable in high-IV, flat-skew conditions."
+    current_rule: "iron fly ranks ahead of balanced all-put fly"
+    evidence_required:
+      - captured_tws_snapshot
+      - manual_optionnet_explorer_test
+      - paper_tws_campaign
+    metrics:
+      - credit_quality
+      - cash_efficiency
+      - return_on_cash
+      - drawdown
+    promote_when: "Better fills compensate for the cash-account inefficiency versus an all-put fly."
+    reject_when: "The balanced put fly provides equivalent exposure with materially better cash efficiency."
+
+  - id: H007
+    name: m3_bwb_call_cash_account_substitute
+    status: HYPOTHESIS
+    claim: "Same-expiry put BWB plus 70-80 delta ITM call is an effective cash-account substitute for fly-plus-call-calendar combinations."
+    current_rule: "use the ITM call to flatten upside T+0 and add positive delta"
+    evidence_required:
+      - manual_optionnet_explorer_test
+      - captured_tws_snapshot
+      - paper_tws_campaign
+    metrics:
+      - t0_shape_stability
+      - delta_path
+      - cash_efficiency
+      - adjustment_frequency
+      - realised_return
+    promote_when: "OptionNet and paper campaigns show stable risk shape and acceptable cash use."
+    reject_when: "The call debit, skew exposure, or path dependency makes the substitute inferior."
+
+  - id: H008
+    name: monday_entry_cadence
+    status: HYPOTHESIS
+    claim: "Monday close is preferable to Friday close for campaign entries."
+    current_rule: "Monday default; Friday prefers debit long-vega structures"
+    evidence_required:
+      - context_replay
+      - captured_tws_snapshot
+      - live_shadow_decision
+    metrics:
+      - entry_debit_or_credit
+      - weekend_gap_loss
+      - slippage
+      - five_day_pnl
+    promote_when: "Monday advantage remains after matching regime and structure."
+    reject_when: "Day-of-week effect disappears after controls or differs by structure."
+
+  - id: H009
+    name: structure_profit_targets
+    status: HYPOTHESIS
+    claim: "Current family-specific profit and loss targets improve campaign outcomes."
+    current_rule: "generic credit/debit PT and SL fractions plus 8-15% return-on-risk guidance"
+    evidence_required:
+      - paper_tws_campaign
+      - manual_optionnet_explorer_test
+    metrics:
+      - expectancy
+      - giveback
+      - average_hold
+      - drawdown
+      - premature_exit_cost
+    promote_when: "Targets improve expectancy or tail risk versus time-only and risk-trigger alternatives."
+    reject_when: "Targets merely truncate winners or delay necessary exits."
+
+  - id: H010
+    name: delta_and_vega_budgets
+    status: HYPOTHESIS
+    claim: "Current NLV-scaled delta and vega limits are suitable portfolio constraints."
+    current_rule: "5 Risk Navigator deltas and $1200 vega per $100k NLV"
+    evidence_required:
+      - guided_tws_risk_navigator_comparison
+      - paper_tws_campaign
+      - stress_test
+    metrics:
+      - budget_breach_frequency
+      - stress_loss
+      - capital_utilisation
+      - drawdown
+    promote_when: "Units reconcile to TWS and limits control stress without making the system unusable."
+    reject_when: "Limits are mis-scaled, insufficient in correlated books, or dominated by stress constraints."
+
+  - id: H011
+    name: continuous_deployment_adds_value
+    status: HYPOTHESIS
+    claim: "Maintaining an active campaign improves outcomes versus conditional deployment and cash."
+    current_rule: "not active; continuous monitoring only"
+    evidence_required:
+      - context_replay
+      - live_shadow_decision
+      - paper_tws_campaign
+    metrics:
+      - return_after_costs
+      - sharpe_or_sortino
+      - max_drawdown
+      - expected_shortfall
+      - capital_utilisation
+    promote_when: "Continuous deployment wins across out-of-sample regimes without unacceptable tail deterioration."
+    reject_when: "Higher utilisation produces weaker risk-adjusted returns or materially worse drawdown."
+    safety_note: "Failure does not affect continuous monitoring; it only rejects forced exposure."
+
+  - id: H012
+    name: adjustments_add_value
+    status: HYPOTHESIS
+    claim: "Risk-reducing adjustments improve campaign expectancy versus closing and re-entering."
+    current_rule: "adjust only when a binding risk measure improves"
+    evidence_required:
+      - manual_optionnet_explorer_test
+      - paper_tws_campaign
+    metrics:
+      - incremental_pnl
+      - risk_reduction
+      - added_cash_or_margin
+      - slippage
+      - adjustment_count
+    promote_when: "Adjustments improve risk-adjusted outcomes after incremental costs."
+    reject_when: "They mainly defer loss recognition, add complexity, or consume excessive cash."
