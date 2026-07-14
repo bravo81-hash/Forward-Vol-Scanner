@@ -1,6 +1,24 @@
 import store.campaigns as campaign_module
 
 
+def test_historical_snapshot_endpoint(monkeypatch):
+    import core.historical
+    import webapp
+
+    expected = {"symbol": "SPX", "entry_date": "2025-03-17", "spot": 5600,
+                "intent": "neutral", "confidence": "HIGH"}
+    monkeypatch.setattr(core.historical, "auto_historical_snapshot",
+                        lambda symbol, as_of: {**expected, "symbol": symbol,
+                                               "entry_date": as_of.isoformat()})
+    client = webapp.app.test_client()
+    response = client.get("/api/v3/historical-snapshot?symbol=SPX&entry_date=2025-03-17")
+    assert response.status_code == 200
+    assert response.get_json() == expected
+    assert client.get(
+        "/api/v3/historical-snapshot?symbol=SPX&entry_date=2025-03-16"
+    ).status_code == 400
+
+
 def test_v3_mock_end_to_end(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "v3.sqlite"))
     campaign_module._STORE = None

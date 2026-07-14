@@ -219,6 +219,29 @@ def api_v3_defaults():
                     "timezone": "America/New_York"})
 
 
+@app.get("/api/v3/historical-snapshot")
+def api_v3_historical_snapshot():
+    """Build the low-input ONE regime from free daily market history."""
+    from core.historical import auto_historical_snapshot
+
+    symbol = request.args.get("symbol", "SPX").upper().strip()
+    raw = request.args.get("entry_date", "")
+    try:
+        as_of = date.fromisoformat(raw)
+    except ValueError:
+        return jsonify({"error": "choose a valid historical date"}), 400
+    if as_of > trading_today():
+        return jsonify({"error": "entry date cannot be in the future"}), 400
+    if as_of.weekday() > 4:
+        return jsonify({"error": "choose a trading weekday"}), 400
+    try:
+        return jsonify(auto_historical_snapshot(symbol, as_of))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": f"automatic history unavailable: {exc}"}), 503
+
+
 @app.get("/api/v3/opportunities")
 def api_v3_opportunities():
     """Executable Gate S candidates for mock/ONE testing and later paper use."""

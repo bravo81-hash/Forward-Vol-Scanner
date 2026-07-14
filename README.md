@@ -13,6 +13,11 @@ server-side candidates, campaign journaling, management advice, and manual
 evidence capture. Open `/campaigns` for the v3 workflow. Hypothesis strategies
 remain test-only until manual/paper evidence supports promotion.
 
+For a historical ONE test, normally enter only the date, underlying, account,
+and an optional directional override. The app derives the price/volatility
+regime from free daily history. VIX9D/VIX3M and SKEW are clearly labelled
+proxies; actual historical option legs, fills, and outcomes still come from ONE.
+
 ## Run
 ```
 pip install -r requirements.txt
