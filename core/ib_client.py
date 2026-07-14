@@ -71,7 +71,12 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
         from ib_insync import IB
         ib = IB()
         ib.RequestTimeout = TWS_REQUEST_TIMEOUT
-        ib.RaiseRequestErrors = True
+        # Contract discovery is intentionally tolerant. IB returns error 200
+        # for some unavailable expiry/strike combinations even when the rest
+        # of the option chain is valid; ib_insync then leaves those contracts
+        # unqualified so callers can filter conId == 0. Raising here would
+        # abort the complete live scan on the first unusable combination.
+        ib.RaiseRequestErrors = False
         try:
             out["stage"] = "connection"
             ib.connect(host, port, clientId=next(_client_ids), timeout=10)
