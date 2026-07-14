@@ -13,7 +13,8 @@ Run:  python webapp.py
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -172,13 +173,18 @@ def api_smsf():
 
 
 def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None,
-                as_of: date | None = None, manual: dict | None = None):
+                as_of: date | None = None, manual: dict | None = None,
+                mandate: str | None = None):
     """Build a v3 context with one central mandate and optional live book."""
     from config.loader import account_profile
     from core.chain import MOCK, SURFACE_CFG
     from core.yf_client import build_context_yf
 
     profile = account_profile(account, nlv)
+    if mandate == "cash":
+        profile.update(pool="investing", cash_account=True, block_multi_expiry=True)
+    elif mandate == "margin":
+        profile.update(pool="trading", cash_account=False, block_multi_expiry=False)
     errors, ctx = [], None
     order = {"mock": ["mock"], "live": ["live"], "yf": ["yf"],
              "auto": (["live", "yf", "mock"] if symbol in SURFACE_CFG else ["yf"])}.get(mode)
@@ -209,6 +215,11 @@ def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None,
             ctx.book = {"error": str(exc)}
     if isinstance(ctx.book, dict):
         ctx.book.update(account=account, nlv=profile["nlv"], symbol=symbol)
+    if ctx.mode == "live":
+        captured = datetime.now(ZoneInfo("America/New_York"))
+        ctx.data.update(session=ctx.today.isoformat(),
+                        as_of_time=captured.strftime("%H:%M:%S"),
+                        captured_at=captured.isoformat(), source="tws_live")
     return ctx, profile, errors
 
 
@@ -254,15 +265,38 @@ def api_v3_opportunities():
     mode = request.args.get("mode", "mock").lower()
     account = request.args.get("account") or "MOCK-B"
     nlv = request.args.get("nlv", type=float)
+    mandate = request.args.get("mandate")
     lab = request.args.get("lab", "false").lower() in ("1", "true", "yes")
     if intent not in ("auto", "bull", "neutral", "bear"):
         return jsonify({"error": "intent must be auto, bull, neutral, or bear"}), 400
+    if mandate not in (None, "cash", "margin"):
+        return jsonify({"error": "mandate must be cash or margin"}), 400
     try:
         as_of, manual = _manual_one_context(intent)
-        ctx, profile, errors = _v3_context(symbol, mode, account, nlv, as_of, manual)
+        ctx, profile, errors = _v3_context(symbol, mode, account, nlv, as_of, manual,
+                                           mandate)
         out = (strategy_lab(ctx, intent, account, profile["nlv"]) if lab
                else campaign_shortlist(ctx, intent, account, profile["nlv"]))
         out["symbol"], out["spot"], out["book"] = symbol, ctx.spot, ctx.book
+        if ctx.mode == "live" and out["cards"]:
+            from portfolio.governor import evaluate_candidate
+            try:
+                with_ib(lambda ib: reprice_cards(ib, symbol, ctx.spot, ctx.today,
+                                                  out["cards"]))
+                for card in out["cards"]:
+                    gov = evaluate_candidate(card, ctx.book, profile["nlv"], ctx.spot,
+                                             out["market_state"]["size"])
+                    card["governor"] = gov
+                    card["lots"] = {"lots": gov["approved_lots"],
+                                    "binding": gov["binding"], "size": gov["size"]}
+                out["live_capture"] = {"status": "TWS_CONNECTED",
+                                       "quoted_cards": sum(c.get("mid_src") == "live"
+                                                           for c in out["cards"]),
+                                       "captured_at": ctx.data.get("captured_at")}
+            except Exception as exc:             # exact listed legs remain usable in ONE
+                out["live_capture"] = {"status": "LEGS_ONLY",
+                                       "quote_error": str(exc),
+                                       "captured_at": ctx.data.get("captured_at")}
         if errors:
             out["fallback_chain"] = errors
         persist_cards(out, ttl_seconds=86400 if ctx.mode == "mock" else 900)

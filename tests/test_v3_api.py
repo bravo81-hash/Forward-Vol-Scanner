@@ -19,6 +19,48 @@ def test_historical_snapshot_endpoint(monkeypatch):
     ).status_code == 400
 
 
+def test_live_tws_one_mode_uses_current_context(monkeypatch, tmp_path):
+    monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "live-one.sqlite"))
+    campaign_module._STORE = None
+    import webapp
+    from core.context import build_context
+
+    ctx = build_context("SPX", "mock")
+    ctx.mode = "live"
+    ctx.data.update(session=ctx.today.isoformat(), fresh=True,
+                    as_of_time="15:30:00", captured_at="2026-07-14T15:30:00-04:00")
+    profile = {"account": "DU123", "nlv": 100_000.0, "pool": "investing",
+               "cash_account": True, "block_multi_expiry": True, "mode": "paper"}
+    ctx.mandate = profile
+    monkeypatch.setattr(webapp, "_v3_context",
+                        lambda *args, **kwargs: (ctx, profile, []))
+    monkeypatch.setattr(webapp, "with_ib", lambda fn: fn(object()))
+
+    def fake_reprice(_ib, _symbol, _spot, _today, cards):
+        for card in cards:
+            card["mid_src"] = "live"
+
+    monkeypatch.setattr(webapp, "reprice_cards", fake_reprice)
+    data = webapp.app.test_client().get(
+        "/api/v3/opportunities?symbol=SPX&intent=bull&mode=live&account=DU123"
+        "&mandate=cash&nlv=100000"
+    ).get_json()
+    assert data["mode"] == "live"
+    assert data["live_capture"]["status"] == "TWS_CONNECTED"
+    assert data["live_capture"]["quoted_cards"] == len(data["cards"])
+    assert data["data"]["as_of_time"] == "15:30:00"
+    assert all(c["one_recipe"]["entry_time_et"] == "15:30:00" for c in data["cards"])
+
+
+def test_explicit_mandate_can_override_mock_account_type():
+    import webapp
+
+    _, profile, _ = webapp._v3_context("SPX", "mock", "MOCK-B", 100_000,
+                                       mandate="margin")
+    assert profile["cash_account"] is False
+    assert profile["block_multi_expiry"] is False
+
+
 def test_v3_mock_end_to_end(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "v3.sqlite"))
     campaign_module._STORE = None
@@ -49,6 +91,9 @@ def test_v3_mock_end_to_end(monkeypatch, tmp_path):
     defaults = client.get("/api/v3/defaults").get_json()
     assert defaults["timezone"] == "America/New_York"
     assert client.get("/campaigns").status_code == 200
+    page = client.get("/campaigns").get_data(as_text=True)
+    assert "Live TWS → ONE" in page
+    assert "Copy ONE legs" in page
 
 
 def test_v3_lab_exposes_all_cash_permitted_families(monkeypatch, tmp_path):
@@ -123,3 +168,5 @@ def test_two_strategies_form_one_complete_matched_date_session(monkeypatch, tmp_
     assert {c["card"]["test_session_id"] for c in campaigns} == {data["test_session_id"]}
     evidence = client.get("/api/v3/evidence").get_json()
     assert evidence["complete_matched_sessions"] == 1
+    assert evidence["complete_historical_sessions"] == 1
+    assert evidence["complete_forward_sessions"] == 0

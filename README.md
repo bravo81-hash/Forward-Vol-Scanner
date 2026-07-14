@@ -18,13 +18,19 @@ and an optional directional override. The app derives the price/volatility
 regime from free daily history. VIX9D/VIX3M and SKEW are clearly labelled
 proxies; actual historical option legs, fills, and outcomes still come from ONE.
 
+The same `/campaigns` screen also has **Live TWS → ONE**. When TWS is running,
+it discovers managed accounts, reads the current chain/regime/book, selects
+currently listed legs, and attempts to replace model prices with live NBBOs.
+Those positions can be recorded as prospective ONE forward tests. A live test
+is out-of-sample evidence only when its rule and parameters were frozen before
+the outcome was observed.
+
 ## Run
 ```
 pip install -r requirements.txt
 python webapp.py            # -> http://127.0.0.1:8765
 ```
-Mock/OptionNet mode works with no TWS. For live dependencies use
-`pip install -r requirements-live.txt`. Live mode expects TWS on 127.0.0.1:7496
+Historical OptionNet mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
 (edit `core/ib_client.py`).
 
 All trading-date logic anchored to America/New_York via `core.events.trading_today()`.

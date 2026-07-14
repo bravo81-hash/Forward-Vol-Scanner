@@ -160,7 +160,9 @@ def _session_id(ctx, profile: dict, inputs: dict) -> str:
 
 def rank_campaign(ctx, intent: str, account: str | None, nlv: float | None,
                   include_all: bool = False) -> dict:
-    profile, bias = account_profile(account, nlv), _bias(ctx, intent)
+    profile = dict(ctx.mandate or account_profile(account, nlv))
+    profile.update(account=account, nlv=float(nlv or profile.get("nlv") or 100_000))
+    bias = _bias(ctx, intent)
     state = market_state(ctx)
     cards, excluded = [], []
     for key, strat in REGISTRY.items():
