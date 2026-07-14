@@ -4,6 +4,23 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 US_TZ = ZoneInfo("America/New_York")
+MEL_TZ = ZoneInfo("Australia/Melbourne")
+
+
+def trading_clock(now: datetime | None = None) -> dict:
+    """One DST-aware clock for NY trading logic and Melbourne display."""
+    ny = datetime.now(US_TZ) if now is None else now.astimezone(US_TZ)
+    mel = ny.astimezone(MEL_TZ)
+    minute = ny.hour * 60 + ny.minute
+    weekday = ny.weekday() < 5
+    regular = weekday and 9 * 60 + 30 <= minute <= 16 * 60 + 15
+    phase = ("WEEKEND" if not weekday else "PRE-MARKET" if minute < 9 * 60 + 30
+             else "REGULAR SESSION" if regular else "AFTER HOURS")
+    return {"ny_date": ny.date().isoformat(), "ny_time": ny.strftime("%H:%M:%S"),
+            "melbourne_date": mel.date().isoformat(),
+            "melbourne_time": mel.strftime("%H:%M:%S"),
+            "captured_at_ny": ny.isoformat(), "captured_at_melbourne": mel.isoformat(),
+            "regular_session": regular, "market_phase": phase}
 
 
 def trading_today() -> date:

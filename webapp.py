@@ -13,13 +13,12 @@ Run:  python webapp.py
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date, timedelta
 
 from flask import Flask, jsonify, request, send_from_directory
 
 from core.context import build_context
-from core.events import trading_today
+from core.events import trading_clock, trading_today
 from core.ib_client import DEFAULT_HOST, DEFAULT_PORT, with_ib
 from core.models import Leg
 from core.pricing import struct_value, q_for
@@ -216,18 +215,22 @@ def _v3_context(symbol: str, mode: str, account: str | None, nlv: float | None,
     if isinstance(ctx.book, dict):
         ctx.book.update(account=account, nlv=profile["nlv"], symbol=symbol)
     if ctx.mode == "live":
-        captured = datetime.now(ZoneInfo("America/New_York"))
-        ctx.data.update(session=ctx.today.isoformat(),
-                        as_of_time=captured.strftime("%H:%M:%S"),
-                        captured_at=captured.isoformat(), source="tws_live")
+        clock = trading_clock()
+        ctx.data.update(session=clock["ny_date"], as_of_time=clock["ny_time"],
+                        captured_at=clock["captured_at_ny"],
+                        melbourne_date=clock["melbourne_date"],
+                        melbourne_time=clock["melbourne_time"],
+                        captured_at_melbourne=clock["captured_at_melbourne"],
+                        market_phase=clock["market_phase"], source="tws_live")
     return ctx, profile, errors
 
 
 @app.get("/api/v3/defaults")
 def api_v3_defaults():
     """Trading-session defaults use New York, not the browser's local date."""
-    return jsonify({"entry_date": trading_today().isoformat(), "entry_time": "15:30",
-                    "timezone": "America/New_York"})
+    clock = trading_clock()
+    return jsonify({"entry_date": clock["ny_date"], "entry_time": "15:30",
+                    "timezone": "America/New_York", "clock": clock})
 
 
 @app.get("/api/v3/historical-snapshot")

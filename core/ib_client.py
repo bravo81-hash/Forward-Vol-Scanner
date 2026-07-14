@@ -46,6 +46,16 @@ BARS_CACHE = TTLCache(3600)     # daily bars: 1 h
 PARAMS_CACHE = TTLCache(6 * 3600)
 
 
+def _finish_result(out: dict, timed_out: bool):
+    if timed_out:
+        raise RuntimeError("TWS request timed out after 120 seconds; reconnect TWS and retry")
+    if "error" in out:
+        raise RuntimeError(out["error"])
+    if "result" not in out:
+        raise RuntimeError("TWS request ended without a result; reconnect TWS and retry")
+    return out["result"]
+
+
 def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
     """Run fn(ib) on a fresh connection in its own thread + event loop."""
     out: dict = {}
@@ -56,9 +66,11 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
         ib = IB()
         try:
             ib.connect(host, port, clientId=next(_client_ids), timeout=10)
+            out["connected"] = True
             out["result"] = fn(ib)
         except Exception as e:        # noqa: BLE001 — surfaced to caller
-            out["error"] = f"{type(e).__name__}: {e}"
+            phase = "request" if out.get("connected") else "connection"
+            out["error"] = f"TWS {phase} failed: {type(e).__name__}: {e}"
         finally:
             if ib.isConnected():
                 ib.disconnect()
@@ -66,9 +78,7 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
     th = threading.Thread(target=target, daemon=True)
     th.start()
     th.join(timeout=120)
-    if "error" in out:
-        raise RuntimeError(out["error"])
-    return out.get("result")
+    return _finish_result(out, th.is_alive())
 
 
 def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT):

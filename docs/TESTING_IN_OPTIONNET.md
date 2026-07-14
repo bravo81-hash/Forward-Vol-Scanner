@@ -33,6 +33,13 @@ the actual historical structure and price.
    enter each copied quantity, expiry, strike, and put/call line.
 5. Add it as a forward test before advancing time or seeing the result.
 
+The authoritative date is always the **New York trading date**. The screen
+shows its Melbourne conversion beside it; this avoids accidentally testing the
+next Melbourne calendar date while New York is still on the prior session.
+Both conversions use DST-aware IANA time zones. During Melbourne daytime, when
+New York is commonly closed, the app requests frozen TWS data and labels any
+historical-IV surface fallback.
+
 **Copy ONE legs** copies a plain-text checklist; it does not automatically
 create a ONE trade. Historical cards contain model targets and may need the
 nearest listed contract. Live cards use contracts selected from the current
