@@ -134,6 +134,16 @@ BUILD_SPECS: dict[str, dict] = {
         "when": "Low IV with a directional view, or any strong view with "
                 "a level",
     },
+    "debit_spread": {
+        "label": "Directional debit spread",
+        "role": "Defensive-state participation and debit-only adjustment",
+        "dte": "30–60 DTE; match expiry to the thesis horizon",
+        "body": "Long near-ATM 50–60Δ option; short near the directional target",
+        "wings": "One same-expiry vertical; no uncovered tail",
+        "cash": "Debit only; risk no more than 0.5% NLV",
+        "manage": "Take 50–75% of debit; stop near 50%; compare every repair with closing",
+        "when": "Negative forward VRP or inverted-front defensive state with a declared direction",
+    },
 }
 
 VARIANT_KEYS = list(BUILD_SPECS)
@@ -163,13 +173,13 @@ def gate_s(ctx: Context, bias: int) -> tuple[list[tuple[str, str]], list[str]]:
     if tverd == "INVERTED FRONT":
         notes.append("TERM INVERTED — stress regime: all short-gamma books "
                      "correlate here; this position counts in the drawdown "
-                     "ladder. Small size or stand aside")
-        order = [
-            ("iron_fly", f"If trading at all: short-DTE, wide, small — front "
-                         f"IV rich ({band_src}) but unstable"),
-            ("target_fly", "Debit-only convexity to a level survives the "
-                           "regime; everything short-premium is suspect"),
-        ]
+                     "ladder. Audit rule: zero new carry exposure")
+        order = ([
+            ("debit_spread", "Defined-debit directional participation; no new carry campaign"),
+            ("target_fly", "Debit-only convexity to a declared level"),
+        ] if bias else [
+            ("target_fly", "Only with a declared level; otherwise stand aside in cash"),
+        ])
         return order, notes
 
     if lo:
@@ -322,7 +332,8 @@ def smsf_verdict(ctx: Context, intent: str = "auto") -> dict:
     else:
         action = f"ACTION: {structures[0]['label'].upper()}"
         if term.get("verdict") == "INVERTED FRONT":
-            action += " — DE-GROSS REGIME, small size only"
+            action = ("ACTION: STAND ASIDE — INVERTED FRONT, ZERO NEW CARRY"
+                      if bias == 0 else action + " — DEBIT ONLY; ZERO NEW CARRY")
 
     notes.append("Cash-account doctrine: single expiry only; adjust with "
                  "debit-side adds (long option / debit spread / extra wing) — "
@@ -347,3 +358,57 @@ def smsf_verdict(ctx: Context, intent: str = "auto") -> dict:
         },
         "structures": structures, "notes": notes, "data": ctx.data,
     }
+
+
+# ------------------------------------------------------ executable v3 -----
+_REGISTRY_KEY = {"put_bwb": "bwb"}
+
+
+def smsf_shortlist(ctx: Context, intent: str = "auto", account: str | None = None,
+                   nlv: float | None = None) -> dict:
+    """Turn Gate S rankings into exact, risk-evaluated candidates.
+
+    Hypothesis candidates are stage-blocked for live TWS but remain fully
+    available for mock campaigns and manual OptionNet Explorer testing.
+    """
+    from config.loader import account_profile, hypothesis
+    from portfolio.governor import evaluate_candidate
+    from selection.manage import management_plan
+    from strategies import REGISTRY
+
+    base = smsf_verdict(ctx, intent)
+    profile = account_profile(account, nlv)
+    cards = []
+    for row in base["structures"]:
+        key = _REGISTRY_KEY.get(row["key"], row["key"])
+        strat = REGISTRY.get(key)
+        if not strat:
+            continue
+        props = (strat.propose_for_bias(ctx, base["bias"])
+                 if key in ("target_fly", "debit_spread") else strat.propose(ctx))
+        for s in props[:2]:
+            s.rationale.insert(0, row["why"])
+            s.manage = management_plan(ctx, s)
+            hyp_id = s.evidence.get("hypothesis_id")
+            ev = hypothesis(hyp_id)
+            s.evidence = {"hypothesis_id": hyp_id,
+                          "status": ev.get("status", s.evidence.get("status", "HYPOTHESIS")),
+                          "name": ev.get("name")}
+            card = s.to_dict()
+            gov = evaluate_candidate(card, ctx.book, profile["nlv"], ctx.spot,
+                                     "STAND" if "STAND ASIDE" in base["action"] else
+                                     "QUARTER" if ctx.regime.get("vol_state") == "STR" else
+                                     "HALF" if ctx.regime.get("vol_state") == "ELV" else "FULL")
+            card["governor"] = gov
+            card["lots"] = {"lots": gov["approved_lots"],
+                            "binding": gov["binding"], "size": gov["size"]}
+            card["manual_test_allowed"] = True
+            card["tws_stage_allowed"] = (ctx.mode == "mock" or
+                                          ev.get("status") in ("PAPER", "ACTIVE"))
+            if not card["tws_stage_allowed"]:
+                card["blocks"].append("Hypothesis strategy: test in OptionNet/paper before TWS staging")
+            cards.append(card)
+    cards.sort(key=lambda c: c["score"], reverse=True)
+    base.update(cards=cards, account=profile, mode=ctx.mode, spot=ctx.spot,
+                policy_id="gate-s-v3", executable=True)
+    return base

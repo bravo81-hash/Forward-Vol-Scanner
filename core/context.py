@@ -17,10 +17,17 @@ from .surface import FRONT_DTE, iv_cm, pair_table, term_stats
 
 
 def build_context(symbol: str, mode: str = "mock", today: date | None = None,
-                  host=None, port=None) -> Context:
+                  host=None, port=None, manual: dict | None = None) -> Context:
     today = today or trading_today()
+    manual = manual or {}
     if mode == "mock":
-        spot, slices, strikes = build_chain_mock(symbol, today)
+        spot, slices, strikes = build_chain_mock(
+            symbol, today,
+            spot_override=manual.get("spot"),
+            iv30_override=(float(manual["iv30"]) / 100 if manual.get("iv30") else None),
+            rr25_override=manual.get("rr25_30d"),
+            term_override=manual.get("term"),
+        )
         bars = mock_bars(symbol, spot, today)
         iv30 = iv_cm(slices, 30) * 100
         ivh = mock_iv_hist(iv30 * 0.96)
@@ -63,7 +70,63 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
                   q=q_for(symbol), data=data)
     ctx.pairs = pair_table(slices, today)
     ctx.regime["term"] = term_stats(slices)
+    if manual:
+        _apply_manual_context(ctx, manual)
     return ctx
+
+
+def _apply_manual_context(ctx: Context, manual: dict) -> None:
+    """Apply values read by the user from ONE for one historical test session."""
+    reg = ctx.regime
+    band = manual.get("iv_band")
+    if band:
+        reg["vol_state"] = band
+        reg["iv_pctl"] = {"CMP": 15.0, "NRM": 45.0,
+                          "ELV": 72.0, "STR": 90.0}[band]
+    for key in ("iv30", "rv21", "vrp_fwd"):
+        if manual.get(key) is not None:
+            reg[key] = round(float(manual[key]), 2)
+    if manual.get("rv21") is not None:
+        reg["har_rv"] = round(float(manual["rv21"]), 2)
+    if manual.get("vrp_fwd") is not None:
+        reg["vrp"] = round(float(manual["vrp_fwd"]), 2)
+        reg["vrp_flip"] = False
+    if manual.get("bias") is not None:
+        reg["bias"] = int(manual["bias"])
+    if manual.get("trend"):
+        reg["trend"] = manual["trend"]
+    reg["gamma"] = ("-g" if reg.get("vol_state") == "STR" or
+                    manual.get("term") == "INVERTED FRONT" else
+                    "+g" if reg.get("trend") == "RNG" else "g?")
+    term = reg.setdefault("term", {})
+    if manual.get("term"):
+        term["verdict"] = manual["term"]
+    if manual.get("rr25_30d") is not None:
+        rr = round(float(manual["rr25_30d"]), 2)
+        term["rr25_30d"] = rr
+        term["skew_rich"] = rr / max(float(reg.get("iv30") or 1), 1) > 0.30
+
+    event = manual.get("event", "NONE")
+    if event == "NONE":
+        for key in ("opex_week", "fomc_in_front", "macro_in_front", "post_opex"):
+            ctx.events[key] = False
+    elif event == "OPEX":
+        ctx.events["opex_week"] = True
+        ctx.events["opex_date"] = min(ctx.slices, key=lambda s: s.dte).expiry.isoformat()
+    elif event == "FOMC":
+        ctx.events["fomc_in_front"] = True
+        ctx.events["fomc_dte"] = min(14, min(s.dte for s in ctx.slices))
+    elif event == "MACRO":
+        ctx.events["macro_in_front"] = True
+        ctx.events["macro_type"] = "Manual Tier-1 event"
+        ctx.events["macro_dte"] = min(7, min(s.dte for s in ctx.slices))
+
+    ctx.gates = build_gates(reg, ctx.events, ctx.today)
+    ctx.data = {"session": ctx.today.isoformat(), "fresh": True,
+                "historical": bool(manual.get("historical", True)),
+                "source": "manual_optionnet_context",
+                "as_of_time": manual.get("as_of_time", "15:30"),
+                "note": "Market state supplied from OptionNet Explorer"}
 
 
 def _freshness(bars, today: date, mode: str) -> dict:

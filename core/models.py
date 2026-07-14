@@ -52,6 +52,12 @@ class Suggestion:
     fit: float = 0.0
     manage: dict = field(default_factory=dict)   # P2: entry-time management plan
     lots: dict = field(default_factory=dict)      # P1: per-account lot sizing
+    cash_required: float | None = None            # dollars per 1-lot
+    evidence: dict = field(default_factory=dict)  # hypothesis/status/version
+    policy_id: str = "legacy-v1"
+    eligible: bool = True
+    blocks: list[str] = field(default_factory=list)
+    candidate_id: str | None = None
 
     def to_dict(self) -> dict:
         d = self.__dict__.copy()

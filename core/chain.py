@@ -16,7 +16,9 @@ from .ib_client import CHAIN_CACHE, PARAMS_CACHE, quote_many
 from .models import Slice
 from .pricing import RISK_FREE, q_for
 
-SCAN_DTE = (5, 50)
+# Gate S includes 60-80 DTE cash-account structures. 85 keeps the next listed
+# Friday available without opening the scanner to the separate 130-200 DTE book.
+SCAN_DTE = (5, 85)
 
 SURFACE_CFG = {   # symbol: (secType, exchange, tradingClass, is_index)
     "SPX": ("IND", "CBOE", "SPXW", True),
@@ -152,9 +154,28 @@ MOCK_SPOT = {"SPX": 6000.0, "NDX": 21500.0, "RUT": 2300.0,
              "SPY": 600.0, "QQQ": 525.0, "IWM": 230.0}
 
 
-def build_chain_mock(symbol: str, today: date) -> tuple[float, list[Slice], list[float]]:
+def build_chain_mock(symbol: str, today: date, *, spot_override: float | None = None,
+                     iv30_override: float | None = None,
+                     rr25_override: float | None = None,
+                     term_override: str | None = None) -> tuple[float, list[Slice], list[float]]:
+    """Build a deterministic surface, optionally anchored to a manual ONE snapshot.
+
+    ``iv30_override`` is decimal IV (0.20 = 20%) and ``rr25_override`` is put
+    minus call IV in volatility points.  These overrides let the test UI build
+    strikes for a historical ONE date without pretending that the app owns a
+    historical option-chain database.
+    """
     base, slope, rr, kink = MOCK[symbol]
-    spot = MOCK_SPOT[symbol]
+    spot = float(spot_override or MOCK_SPOT[symbol])
+    manual = any(v is not None for v in
+                 (spot_override, iv30_override, rr25_override, term_override))
+    if iv30_override is not None:
+        base = float(iv30_override)
+    if rr25_override is not None:
+        rr = float(rr25_override)
+    if term_override:
+        slope = {"STEEP CONTANGO": 0.040, "CONTANGO": 0.018,
+                 "FLAT": 0.0, "INVERTED FRONT": 0.0}[term_override]
     step = max(round(spot * 0.0042, 0), 0.5) if spot < 1000 else 5.0
     strikes = [round(spot * 0.8 + i * step, 1) for i in range(int(spot * 0.4 / step) + 1)]
 
@@ -169,8 +190,16 @@ def build_chain_mock(symbol: str, today: date) -> tuple[float, list[Slice], list
         if d.weekday() != 4 or (d - today).days < SCAN_DTE[0]:
             continue
         dte = (d - today).days
-        iv = base + slope * math.sqrt(dte / 30.0)
-        if kink and fomc_within(d, today):
+        if manual:
+            # Keep the requested IV anchored near 30 DTE.  Inversion is a
+            # front-end shock; the other states are smooth curves around IV30.
+            if term_override == "INVERTED FRONT":
+                iv = base * (1 + 0.18 * max(30 - dte, 0) / 25)
+            else:
+                iv = base + slope * (math.sqrt(dte / 30.0) - 1.0)
+        else:
+            iv = base + slope * math.sqrt(dte / 30.0)
+        if not manual and kink and fomc_within(d, today):
             iv += 0.015 * math.exp(-max(0, dte - 5) / 12.0)
         t = dte / 365.0
         half_rr = rr / 200.0

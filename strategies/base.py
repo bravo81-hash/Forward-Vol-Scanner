@@ -15,6 +15,9 @@ FRONT_EXIT_DTE = 7      # any short leg must clear this at latest exit
 class Strategy(ABC):
     key = "base"
     name = "Base"
+    hypothesis_id: str | None = None
+    evidence_status = "ACTIVE"
+    policy_id = "legacy-v1"
 
     @abstractmethod
     def propose(self, ctx: Context) -> list[Suggestion]:
@@ -38,7 +41,11 @@ class Strategy(ABC):
                        max_profit=m["max_profit"], max_loss=m["max_loss"],
                        breakevens=m["breakevens"],
                        score=round(score - liq, 3), rationale=rationale,
-                       liquidity_pen=round(liq, 3))
+                       liquidity_pen=round(liq, 3),
+                       cash_required=round(abs(m["max_loss"]) * MULT, 2),
+                       evidence={"hypothesis_id": self.hypothesis_id,
+                                 "status": self.evidence_status},
+                       policy_id=self.policy_id)
         # targets run on PER-UNIT greeks (strategy delta bands are authored
         # per-unit, e.g. "keep the spread inside +-0.10 delta")
         self._check_targets(ctx, s, delta_band or self.delta_band, gamma_test)
@@ -96,3 +103,9 @@ class Strategy(ABC):
         clean = [s for s in cands if not (fomc_within(s.expiry, ctx.today) and s.dte <= 21)]
         pool = clean or cands
         return min(pool, key=lambda s: abs(s.dte - target)) if pool else None
+
+    @staticmethod
+    def expiry_in(ctx: Context, lo: int, hi: int, target: int) -> Slice | None:
+        """Nearest listed expiry in a strategy-specific DTE window."""
+        cands = [s for s in ctx.slices if lo <= s.dte <= hi]
+        return min(cands, key=lambda s: abs(s.dte - target)) if cands else None

@@ -1,18 +1,36 @@
-# TE Playbook — Trade Selection App
+# TE Playbook + Campaign Engine v3
 
 TWS-connected selection engine for the TE playbook: per ticker it builds
 market context, reads the regime, picks the **top-2 strategy families**
 (calendar, double calendar, diagonal, iron condor, put BWB, butterfly),
 generates **2 concrete candidates each**, and stages the chosen combo to
-TWS (`transmit=False`, whatIf margin first). Management is done in
-OptionNet Explorer by design — this app only selects and stages.
+TWS (`transmit=False`, whatIf margin first).
+
+Campaign Engine v3 adds executable chat-derived single-expiry strategies,
+a historical matched-date OptionNet testing laboratory, one conditional
+cross-strategy ranker, signed portfolio-governor checks, immutable
+server-side candidates, campaign journaling, management advice, and manual
+evidence capture. Open `/campaigns` for the v3 workflow. Hypothesis strategies
+remain test-only until manual/paper evidence supports promotion.
+
+For a historical ONE test, normally enter only the date, underlying, account,
+and an optional directional override. The app derives the price/volatility
+regime from free daily history. VIX9D/VIX3M and SKEW are clearly labelled
+proxies; actual historical option legs, fills, and outcomes still come from ONE.
+
+The same `/campaigns` screen also has **Live TWS → ONE**. When TWS is running,
+it discovers managed accounts, reads the current chain/regime/book, selects
+currently listed legs, and attempts to replace model prices with live NBBOs.
+Those positions can be recorded as prospective ONE forward tests. A live test
+is out-of-sample evidence only when its rule and parameters were frozen before
+the outcome was observed.
 
 ## Run
 ```
-pip install flask ib_insync
+pip install -r requirements.txt
 python webapp.py            # -> http://127.0.0.1:8765
 ```
-Mock mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
+Historical OptionNet mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
 (edit `core/ib_client.py`).
 
 All trading-date logic anchored to America/New_York via `core.events.trading_today()`.
@@ -23,11 +41,13 @@ core/        models · pricing (BS) · ib_client (pacing/caches) · chain ·
              surface (fwd-vol pairs, term) · regime (TE Console port) ·
              events (FOMC/OpEx/ex-div) · context (single data touchpoint)
 strategies/  one module per family, uniform propose(ctx) -> [Suggestion]
-selection/   ranker: regime matrix -> top-2 families -> 4 scored cards
-portfolio/   live book greeks, risk budgets, portfolio-fit score
-execution/   N-leg combo staging, whatIf margin, never auto-transmits
-store/       sqlite audit log (every shortlist + staging)
-static/      browser UI (cards, risk graphs, book bar)
+selection/   current ranker + Gate S + unified v3 selector + strategy lab
+portfolio/   book greeks, signed governor, account aggregation, stress
+execution/   immutable candidate validation + N-leg staging; never transmits
+store/       scan audit + campaign/candidate/manual-test ledger
+management/  deterministic campaign action engine
+validation/  manual evidence and captured-context replay summaries
+static/      TE browser UI + Campaign v3 testing UI
 tests/       mock-mode suite: python -m pytest tests/
 ```
 
@@ -54,7 +74,7 @@ with no IV history fall back to a flagged **IV30/HAR ratio** band.
 ## TWS request budget (per live refresh, per symbol)
 * 1 underlying quote + ~4 x n_expiries option lines — **batched in groups
   of 40 and cancelled immediately** (`core/ib_client.quote_many`)
-* chain expiries limited to **Fridays, 5–50 DTE**
+* chain expiries limited to **Fridays, 5–85 DTE** (supports 60–80 DTE Gate S rows)
 * daily bars + IV30 history: 1 request each, **cached 1 h**
 * chain surface cached **5 min**; secdef params cached 6 h
 * staging: N qualifies + 1 whatIf + 1 placeOrder

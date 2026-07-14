@@ -1,0 +1,29 @@
+version: 1
+
+per_100k:
+  delta: 5.0
+  gamma: 0.75
+  vega: 1200.0
+  theta_min: 0.0
+
+limits:
+  max_campaign_risk_pct_nlv: 0.02
+  target_fly_risk_pct_nlv: 0.0025
+  directional_debit_risk_pct_nlv: 0.005
+  max_campaign_cash_pct_nlv: 0.10
+  max_stress_loss_pct_nlv: 0.04
+  max_lots: 20
+
+stress:
+  - name: down_5_iv_up_10_2d
+    spot_pct: -0.05
+    iv_points: 10.0
+    days: 2
+  - name: down_2_iv_up_4_1d
+    spot_pct: -0.02
+    iv_points: 4.0
+    days: 1
+  - name: up_3_iv_down_3_2d
+    spot_pct: 0.03
+    iv_points: -3.0
+    days: 2
