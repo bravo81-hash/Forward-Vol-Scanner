@@ -135,5 +135,6 @@ def daily_bars(ib, contract, days=300):
     bars = ib.reqHistoricalData(contract, "", f"{days} D", "1 day",
                                 "TRADES", useRTH=True, formatDate=1)
     out = [(b.date, b.open, b.high, b.low, b.close) for b in bars]
-    BARS_CACHE.put(key, out)
+    if out:  # do not turn a temporary permission/feed failure into a 1 h outage
+        BARS_CACHE.put(key, out)
     return out

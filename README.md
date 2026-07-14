@@ -31,6 +31,10 @@ to `America/New_York`; live captures also store the converted
 changes in both locations. Outside New York regular hours the TWS path requests
 frozen quotes and can build the surface from TWS historical IV when current
 option Greeks are unavailable.
+If TWS returns no daily bars or IV-index history, live mode automatically uses
+the same free yfinance underlying/volatility-index history as the historical
+workflow while retaining TWS for the listed option chain. Every source is
+shown on the live capture; a temporary empty TWS response is never cached.
 
 ## Run
 ```
