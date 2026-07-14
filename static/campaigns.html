@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Campaign Engine v3</title>
+<style>
+:root{--bg:#0b0e12;--panel:#141922;--p2:#1b2230;--line:#2d3748;--txt:#e6edf3;--mut:#8b98a8;--jade:#36d399;--amb:#f5b942;--red:#f87171}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px system-ui,sans-serif}header{position:sticky;top:0;z-index:3;display:flex;gap:12px;align-items:center;padding:12px 18px;background:#10151d;border-bottom:1px solid var(--line)}h1{font-size:18px;margin:0}a{color:var(--jade)}main{max-width:1500px;margin:auto;padding:18px}.controls,.tabs{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.controls{padding:12px;background:var(--panel);border:1px solid var(--line);margin-bottom:14px}button,select,input,textarea{background:var(--p2);color:var(--txt);border:1px solid var(--line);padding:8px;font:inherit}button{cursor:pointer}button.primary{border-color:var(--jade);color:var(--jade)}button.warn{border-color:var(--amb);color:var(--amb)}.status{color:var(--mut);margin-left:auto}.verdict{font-weight:700;padding:12px;border:1px solid var(--amb);background:var(--panel);margin:12px 0}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px}.card{background:var(--panel);border:1px solid var(--line);padding:14px}.card h3{margin:3px 0 8px;font-size:16px}.tag{font:11px ui-monospace,monospace;color:var(--amb)}.active{color:var(--jade)}.blocked{color:var(--red)}.legs{font:12px ui-monospace,monospace;line-height:1.6;background:#0f131a;padding:8px}.nums{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}.num{background:var(--p2);padding:6px}.num b{display:block;color:var(--mut);font-size:10px}.why{color:var(--mut);padding-left:18px}.bar{font:12px ui-monospace,monospace;color:var(--mut);margin:6px 0}.section{margin-top:24px;border-top:1px solid var(--line);padding-top:14px}.campaign{background:var(--panel);border:1px solid var(--line);padding:12px;margin-bottom:8px}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.manual{display:grid;grid-template-columns:100px 120px 140px 1fr auto;gap:6px;margin-top:8px}.empty{color:var(--mut);padding:20px}.toast{position:fixed;right:18px;bottom:18px;background:var(--p2);border:1px solid var(--jade);padding:12px;display:none;max-width:420px}@media(max-width:700px){.manual{grid-template-columns:1fr}.nums{grid-template-columns:1fr 1fr}.status{width:100%}}
+</style></head><body>
+<header><h1>Campaign Engine v3</h1><a href="/">TE Playbook</a><span class="status" id="status">ready</span></header>
+<main>
+ <div class="controls">
+  <select id="symbol"><option>SPX</option><option>RUT</option><option>SPY</option><option>QQQ</option><option>IWM</option></select>
+  <select id="intent"><option value="auto">Auto bias</option><option value="bull">Bull</option><option value="neutral">Neutral</option><option value="bear">Bear</option></select>
+  <select id="account"><option value="MOCK-B">MOCK-B · cash/SMSF</option><option value="MOCK-A">MOCK-A · margin</option></select>
+  <input id="nlv" type="number" value="100000" min="10000" step="10000" title="Net liquidation value">
+  <label><input id="lab" type="checkbox"> Show every permitted strategy</label>
+  <button class="primary" id="scan">Build test strategies</button>
+  <span class="bar">Mock mode · no TWS order · exact legs for OptionNet Explorer</span>
+ </div>
+ <div id="result"></div>
+ <div class="section"><div class="row"><h2>Test campaigns</h2><button id="reload">Refresh</button><button id="evidence">Evidence</button></div><div id="campaigns"></div></div>
+</main><div class="toast" id="toast"></div>
+<script>
+const $=id=>document.getElementById(id);let LAST=null;
+function money(v){return new Intl.NumberFormat('en-AU',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(v||0)}
+function toast(s){$('toast').textContent=s;$('toast').style.display='block';setTimeout(()=>$('toast').style.display='none',5000)}
+async function json(url,opt){const r=await fetch(url,opt);const d=await r.json();if(!r.ok||d.error)throw Error(d.error||r.statusText);return d}
+async function scan(){
+ $('status').textContent='building…';const q=new URLSearchParams({symbol:$('symbol').value,intent:$('intent').value,mode:'mock',account:$('account').value,nlv:$('nlv').value,lab:$('lab').checked});
+ try{LAST=await json('/api/v3/opportunities?'+q);renderCards(LAST);$('status').textContent=`${LAST.symbol} ${LAST.mode} · ${LAST.cards.length} candidates`;}
+ catch(e){$('status').textContent='error';toast(e.message)}
+}
+function renderCards(d){
+ let h=`<div class="verdict">${d.action}<div class="bar">Policy ${d.policy_id} · ${d.inputs.iv_band} IV · rr25 ${(+d.inputs.rr25_30d).toFixed(1)}v · ${d.inputs.term}</div></div>`;
+ h+=`<div class="grid">${d.cards.map(card).join('')}</div>`;$('result').innerHTML=h;
+}
+function card(c){const g=c.governor,ev=c.evidence||{};return `<div class="card">
+ <div class="tag ${ev.status==='ACTIVE'?'active':''}">${c.strategy} · ${ev.status||'HYPOTHESIS'} ${ev.hypothesis_id||''} · ${c.selection_source||''}</div><h3>${c.label}</h3>
+ <div class="legs">${c.legs.join('<br>')}</div>
+ <div class="nums"><div class="num"><b>${c.net_mid<0?'CREDIT':'DEBIT'}</b>${Math.abs(c.net_mid).toFixed(2)}</div><div class="num"><b>MAX PROFIT</b>${c.max_profit.toFixed(1)}</div><div class="num"><b>MAX LOSS</b>${c.max_loss.toFixed(1)}</div><div class="num"><b>LIVE-RISK LOTS</b>${g.approved_lots} (ONE test: 1)</div><div class="num"><b>CASH / LOT</b>${money(g.cash_per_lot)}</div><div class="num"><b>DELTA / VEGA</b>${c.greeks.delta.toFixed(1)} / ${c.greeks.vega.toFixed(0)}</div></div>
+ <ul class="why">${c.rationale.map(x=>`<li>${x}</li>`).join('')}</ul>
+ ${c.blocks?.length?`<div class="bar blocked">${c.blocks.join(' · ')}</div>`:''}
+ <div class="bar">ONE: enter these exact legs, quantity 1; inspect T+0/T+5, cash risk, tent movement and IV shifts.</div>
+ <button onclick="copyOne('${c.candidate_id}')">Copy ONE legs</button>
+ <button class="primary" onclick="createCampaign('${c.candidate_id}',${Math.max(1,g.approved_lots||1)})">Create OptionNet test</button>
+ </div>`}
+async function copyOne(id){const c=LAST.cards.find(x=>x.candidate_id===id);const t=`${LAST.symbol} · ${c.label}\n`+c.legs.join('\n')+`\nEntry: ${c.net_mid<0?'credit':'debit'} ${Math.abs(c.net_mid).toFixed(2)}`;await navigator.clipboard.writeText(t);toast('ONE legs copied')}
+async function createCampaign(id,max){
+ try{const d=await json('/api/v3/campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({candidate_id:id,quantity:1,test_mode:'optionnet'})});toast('Created '+d.id);loadCampaigns()}catch(e){toast(e.message)}
+}
+async function loadCampaigns(){
+ try{const rows=await json('/api/v3/campaigns');$('campaigns').innerHTML=rows.length?rows.map(campaign).join(''):'<div class="empty">No test campaigns yet.</div>'}catch(e){toast(e.message)}
+}
+function campaign(c){return `<div class="campaign"><div class="row"><b>${c.id}</b><span class="tag">${c.state}</span><span>${c.symbol} · ${c.label}</span><span class="bar">${c.manual_tests.length} OptionNet result(s)</span></div>
+ <div class="legs">${c.card.legs.join(' · ')}</div>
+ <div class="manual"><select id="r-${c.id}"><option value="">rating</option>${[1,2,3,4,5].map(x=>`<option>${x}</option>`).join('')}</select><input id="p-${c.id}" type="number" step="0.1" placeholder="result %"><input id="d-${c.id}" type="number" step="0.1" placeholder="max DD %"><input id="n-${c.id}" placeholder="what you observed / setup changes"><button class="warn" onclick="saveTest('${c.id}')">Save ONE result</button></div></div>`}
+async function saveTest(id){const v=x=>$(x).value;const body={source:'OptionNet Explorer',setup_rating:v('r-'+id)?+v('r-'+id):null,result_pct:v('p-'+id)?+v('p-'+id):null,max_drawdown_pct:v('d-'+id)?+v('d-'+id):null,notes:v('n-'+id),parameters:{manual:true}};try{await json(`/api/v3/campaigns/${id}/manual-test`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});toast('Saved');loadCampaigns()}catch(e){toast(e.message)}}
+async function showEvidence(){try{const d=await json('/api/v3/evidence');alert(d.limitation+'\n\n'+d.manual_results.map(x=>`${x.strategy}: ${x.tests} tests, avg result ${x.avg_result_pct??'—'}%`).join('\n'))}catch(e){toast(e.message)}}
+$('scan').onclick=scan;$('reload').onclick=loadCampaigns;$('evidence').onclick=showEvidence;$('account').onchange=()=>{$('nlv').value=$('account').value==='MOCK-A'?250000:100000};scan();loadCampaigns();
+</script></body></html>

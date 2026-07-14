@@ -15,6 +15,8 @@ def _round_tick(x: float, tick: float = 0.05) -> float:
 def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
                      qty: int = 1, transmit: bool = False,
                      account: str | None = None) -> dict:
+    if transmit:
+        raise ValueError("automatic transmission is disabled; review and transmit manually in TWS")
     from ib_insync import ComboLeg, Contract, LimitOrder, Option
     st, exch, tc, is_idx = SURFACE_CFG[symbol]
     opts = []
@@ -53,7 +55,7 @@ def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
     live = LimitOrder(action, qty, px)
     if account:
         live.account = account
-    live.transmit = bool(transmit)
+    live.transmit = False
     tr = ib.placeOrder(combo, live)
     ib.sleep(1.0)
     return {"orderId": tr.order.orderId, "action": action, "limit": px,

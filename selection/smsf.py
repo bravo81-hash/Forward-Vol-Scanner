@@ -347,3 +347,57 @@ def smsf_verdict(ctx: Context, intent: str = "auto") -> dict:
         },
         "structures": structures, "notes": notes, "data": ctx.data,
     }
+
+
+# ------------------------------------------------------ executable v3 -----
+_REGISTRY_KEY = {"put_bwb": "bwb"}
+
+
+def smsf_shortlist(ctx: Context, intent: str = "auto", account: str | None = None,
+                   nlv: float | None = None) -> dict:
+    """Turn Gate S rankings into exact, risk-evaluated candidates.
+
+    Hypothesis candidates are stage-blocked for live TWS but remain fully
+    available for mock campaigns and manual OptionNet Explorer testing.
+    """
+    from config.loader import account_profile, hypothesis
+    from portfolio.governor import evaluate_candidate
+    from selection.manage import management_plan
+    from strategies import REGISTRY
+
+    base = smsf_verdict(ctx, intent)
+    profile = account_profile(account, nlv)
+    cards = []
+    for row in base["structures"]:
+        key = _REGISTRY_KEY.get(row["key"], row["key"])
+        strat = REGISTRY.get(key)
+        if not strat:
+            continue
+        props = (strat.propose_for_bias(ctx, base["bias"])
+                 if key == "target_fly" else strat.propose(ctx))
+        for s in props[:2]:
+            s.rationale.insert(0, row["why"])
+            s.manage = management_plan(ctx, s)
+            hyp_id = s.evidence.get("hypothesis_id")
+            ev = hypothesis(hyp_id)
+            s.evidence = {"hypothesis_id": hyp_id,
+                          "status": ev.get("status", s.evidence.get("status", "HYPOTHESIS")),
+                          "name": ev.get("name")}
+            card = s.to_dict()
+            gov = evaluate_candidate(card, ctx.book, profile["nlv"], ctx.spot,
+                                     "STAND" if "STAND ASIDE" in base["action"] else
+                                     "QUARTER" if ctx.regime.get("vol_state") == "STR" else
+                                     "HALF" if ctx.regime.get("vol_state") == "ELV" else "FULL")
+            card["governor"] = gov
+            card["lots"] = {"lots": gov["approved_lots"],
+                            "binding": gov["binding"], "size": gov["size"]}
+            card["manual_test_allowed"] = True
+            card["tws_stage_allowed"] = (ctx.mode == "mock" or
+                                          ev.get("status") in ("PAPER", "ACTIVE"))
+            if not card["tws_stage_allowed"]:
+                card["blocks"].append("Hypothesis strategy: test in OptionNet/paper before TWS staging")
+            cards.append(card)
+    cards.sort(key=lambda c: c["score"], reverse=True)
+    base.update(cards=cards, account=profile, mode=ctx.mode, spot=ctx.spot,
+                policy_id="gate-s-v3", executable=True)
+    return base

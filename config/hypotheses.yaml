@@ -232,3 +232,19 @@ hypotheses:
       - adjustment_count
     promote_when: "Adjustments improve risk-adjusted outcomes after incremental costs."
     reject_when: "They mainly defer loss recognition, add complexity, or consume excessive cash."
+
+  - id: H013
+    name: directional_target_fly
+    status: HYPOTHESIS
+    claim: "A narrow fly centred on a defined price target provides efficient directional convexity."
+    current_rule: "20-45 DTE, body at the target, risk no more than 0.25% NLV, no repair"
+    evidence_required:
+      - manual_optionnet_explorer_test
+      - paper_tws_campaign
+    metrics:
+      - target_hit_rate
+      - reward_to_debit
+      - realised_return
+      - total_loss_rate
+    promote_when: "Target selection and timing show repeatable value after debit and slippage."
+    reject_when: "Results are indistinguishable from low-probability lottery exposure."

@@ -16,7 +16,9 @@ from .ib_client import CHAIN_CACHE, PARAMS_CACHE, quote_many
 from .models import Slice
 from .pricing import RISK_FREE, q_for
 
-SCAN_DTE = (5, 50)
+# Gate S includes 60-80 DTE cash-account structures. 85 keeps the next listed
+# Friday available without opening the scanner to the separate 130-200 DTE book.
+SCAN_DTE = (5, 85)
 
 SURFACE_CFG = {   # symbol: (secType, exchange, tradingClass, is_index)
     "SPX": ("IND", "CBOE", "SPXW", True),

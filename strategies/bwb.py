@@ -4,6 +4,8 @@ from .base import Strategy
 
 class PutBWB(Strategy):
     key, name = "bwb", "Put BWB"
+    hypothesis_id, evidence_status = "H001", "HYPOTHESIS"
+    policy_id = "gate-s-v3"
     delta_band = (0.02, 0.10)
 
     def propose(self, ctx: Context) -> list[Suggestion]:

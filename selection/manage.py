@@ -32,6 +32,12 @@ MGMT = {
     "calendar":        (0.50, 0.50, "debit"),
     "double_calendar": (0.50, 0.50, "debit"),
     "diagonal":        (0.60, 0.50, "debit"),
+    "balanced_fly":    (0.12, 0.40, "debit"),
+    "iron_fly":        (0.25, 1.00, "credit"),
+    "otm_put_fly":     (0.10, 0.40, "debit"),
+    "call_bwb":        (0.12, 0.50, "debit"),
+    "m3_bwb_call":     (0.12, 0.35, "debit"),
+    "target_fly":      (1.00, 1.00, "debit"),
 }
 _DEFAULT = (0.50, 1.00, "credit")
 

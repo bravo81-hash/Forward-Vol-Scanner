@@ -1,0 +1,20 @@
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: ruff check campaign config execution/candidates.py management portfolio/governor.py selection/lab.py selection/unified.py store/campaigns.py strategies/call_bwb.py strategies/fly_variants.py strategies/m3_bwb_call.py validation webapp.py tests/test_v3_*.py
+      - run: python -m compileall -q core strategies selection portfolio execution store management validation campaign config webapp.py

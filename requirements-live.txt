@@ -1,0 +1,3 @@
+-r requirements.txt
+ib-insync==0.9.86
+yfinance==1.2.0

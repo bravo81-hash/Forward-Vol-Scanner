@@ -1,0 +1,23 @@
+version: 1
+
+default:
+  pool: trading
+  cash_account: false
+  block_multi_expiry: false
+  mode: paper
+
+accounts:
+  MOCK-A:
+    label: Mock margin account
+    pool: trading
+    nlv: 250000
+    cash_account: false
+    block_multi_expiry: false
+    mode: mock
+  MOCK-B:
+    label: Mock SMSF cash account
+    pool: investing
+    nlv: 100000
+    cash_account: true
+    block_multi_expiry: true
+    mode: mock
