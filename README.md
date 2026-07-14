@@ -31,10 +31,12 @@ to `America/New_York`; live captures also store the converted
 changes in both locations. Outside New York regular hours the TWS path requests
 frozen quotes and can build the surface from TWS historical IV when current
 option Greeks are unavailable.
-If TWS returns no daily bars or IV-index history, live mode automatically uses
-the same free yfinance underlying/volatility-index history as the historical
-workflow while retaining TWS for the listed option chain. Every source is
-shown on the live capture; a temporary empty TWS response is never cached.
+Live mode preloads the same free yfinance underlying/volatility-index history
+as the historical workflow before connecting to TWS, then uses TWS only for
+the current listed option chain. TWS history is a fallback only when the free
+preload is unavailable. Every source is shown on the live capture; a temporary
+empty TWS response is never cached. IB requests have a 15-second per-request
+limit, and a failed live scan identifies the connection or market-data stage.
 
 ## Run
 ```
@@ -86,7 +88,8 @@ with no IV history fall back to a flagged **IV30/HAR ratio** band.
 * 1 underlying quote + ~4 x n_expiries option lines — **batched in groups
   of 40 and cancelled immediately** (`core/ib_client.quote_many`)
 * chain expiries limited to **Fridays, 5–85 DTE** (supports 60–80 DTE Gate S rows)
-* daily bars + IV30 history: 1 request each, **cached 1 h**
+* daily bars + IV-index history: **preloaded in parallel from yfinance**;
+  TWS requests them only as a fallback, then caches non-empty results for 1 h
 * chain surface cached **5 min**; secdef params cached 6 h
 * staging: N qualifies + 1 whatIf + 1 placeOrder
 
