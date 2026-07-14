@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from core.events import trading_clock
-from core.ib_client import _finish_result
+from core.ib_client import TWS_REQUEST_TIMEOUT, _finish_result, with_ib
 
 
 def test_ny_melbourne_clock_handles_both_dst_seasons():
@@ -24,6 +24,28 @@ def test_tws_missing_result_never_becomes_none_unpack_error():
     with pytest.raises(RuntimeError, match="timed out"):
         _finish_result({}, True)
     assert _finish_result({"result": None}, False) is None
+
+
+def test_every_tws_connection_has_a_per_request_timeout(monkeypatch):
+    module = ModuleType("ib_insync")
+
+    class InstantIB:
+        RequestTimeout = 0
+        RaiseRequestErrors = False
+
+        def connect(self, *_args, **_kwargs):
+            self.connected = True
+
+        def isConnected(self):
+            return getattr(self, "connected", False)
+
+        def disconnect(self):
+            self.connected = False
+
+    module.IB = InstantIB
+    monkeypatch.setitem(__import__("sys").modules, "ib_insync", module)
+    assert with_ib(lambda ib: (ib.RequestTimeout, ib.RaiseRequestErrors)) == (
+        TWS_REQUEST_TIMEOUT, True)
 
 
 class _Contract:
@@ -133,8 +155,9 @@ def test_zero_tws_bars_automatically_use_free_regime_history(monkeypatch):
                         lambda fn, **_kw: fn(_HistorylessIB()))
     ctx = context_module.build_context("SPX", "live", today=today)
     assert ctx.data["tws_daily_bars"] == 0
-    assert ctx.data["regime_bars_source"] == "yfinance ^GSPC fallback"
-    assert ctx.data["iv_history_source"] == "yfinance ^VIX fallback"
+    assert ctx.data["regime_bars_source"] == "yfinance ^GSPC preloaded"
+    assert ctx.data["iv_history_source"] == "yfinance ^VIX preloaded"
+    assert ctx.data["tws_history_requested"] is False
     assert ctx.slices and ctx.regime["iv30"] > 0
 
 
@@ -151,5 +174,5 @@ def test_zero_tws_bars_reports_combined_error_if_free_history_fails(monkeypatch)
     monkeypatch.setattr(context_module, "free_daily_inputs", unavailable)
     monkeypatch.setattr(context_module, "with_ib",
                         lambda fn, **_kw: fn(_HistorylessIB()))
-    with pytest.raises(RuntimeError, match="TWS returned 0 daily bars.*internet unavailable"):
+    with pytest.raises(RuntimeError, match="free history failed.*internet unavailable.*0 daily bars"):
         context_module.build_context("SPX", "live", today=date(2026, 7, 14))

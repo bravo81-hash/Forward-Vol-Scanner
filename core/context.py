@@ -1,8 +1,9 @@
 """Assemble a Context per ticker — ONE place that touches data sources.
 
-TWS budget per live refresh, per symbol:
-  1 underlying snapshot + ~4 x n_expiries option lines (batched, cancelled)
-  + 2 cached historical requests (daily bars, IV30 history; 1h TTL)
+Normal live-refresh budget, per symbol:
+  free daily regime history is preloaded before TWS connects, then TWS serves
+  1 underlying snapshot + ~4 x n_expiries option lines (batched, cancelled).
+  TWS history is used only when the free preload is unavailable.
 """
 from __future__ import annotations
 from datetime import date
@@ -33,56 +34,62 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
         iv30 = iv_cm(slices, 30) * 100
         ivh = mock_iv_hist(iv30 * 0.96)
     else:
+        clock = trading_clock()
+        free, free_error = None, None
+        try:
+            # Preload outside the TWS thread. This prevents a missing IB
+            # historical-data permission or a free HTTP lookup from holding
+            # an open socket request until the global watchdog fires.
+            free = free_daily_inputs(
+                symbol, today,
+                include_as_of=clock["market_phase"] == "AFTER HOURS")
+        except Exception as exc:
+            free_error = str(exc)
+
         def job(ib):
             from ib_insync import Index, Stock
             st, exch, tc, is_idx = SURFACE_CFG[symbol]
             und = Index(symbol, exch, "USD") if is_idx else Stock(symbol, "SMART", "USD")
             ib.qualifyContracts(und)
-            clock = trading_clock()
             diag = {"market_data_type": "live" if clock["regular_session"] else "frozen"}
-            try:
-                brs = daily_bars(ib, und)
-            except Exception as exc:             # free fallback below
-                brs = []
-                diag["tws_bars_error"] = str(exc)
-            key = ("ivh", symbol)
-            ivh_ = BARS_CACHE.get(key)
-            if ivh_ is None:
+            if free:
+                brs, ivh_ = free["bars"], free["ivh"]
+                diag.update(regime_bars_source=free["price_source"] + " preloaded",
+                            iv_history_source=(free["iv_source"] + " preloaded"
+                                               if len(ivh_) >= 60 else "unavailable"),
+                            tws_daily_bars=0, tws_iv_history_rows=0,
+                            tws_history_requested=False)
+            else:
                 try:
-                    hb = ib.reqHistoricalData(und, "", "252 D", "1 day",
-                                              "OPTION_IMPLIED_VOLATILITY",
-                                              useRTH=True, formatDate=1)
-                    ivh_ = [b.close * 100 for b in hb]
-                except Exception as exc:         # option quotes/free IV can replace it
-                    ivh_ = []
-                    diag["tws_iv_history_error"] = str(exc)
-                if ivh_:
-                    BARS_CACHE.put(key, ivh_)
-            tws_bar_count, tws_iv_count = len(brs), len(ivh_)
-            free = None
-            if tws_bar_count < 150 or tws_iv_count < 60:
-                try:
-                    free = free_daily_inputs(
-                        symbol, today,
-                        include_as_of=clock["market_phase"] == "AFTER HOURS")
+                    brs = daily_bars(ib, und)
                 except Exception as exc:
-                    diag["free_history_error"] = str(exc)
-            if len(brs) < 150:
-                if not free:
-                    raise RuntimeError(f"{symbol}: TWS returned {tws_bar_count} daily bars "
-                                       "and the free fallback was unavailable: "
-                                       f"{diag.get('free_history_error', 'unknown error')}")
-                brs = free["bars"]
-                diag["regime_bars_source"] = free["price_source"] + " fallback"
-            else:
-                diag["regime_bars_source"] = "TWS daily history"
-            if len(ivh_) < 60 and free and len(free["ivh"]) >= 60:
-                ivh_ = free["ivh"]
-                diag["iv_history_source"] = free["iv_source"] + " fallback"
-            else:
-                diag["iv_history_source"] = ("TWS implied-volatility history"
-                                             if len(ivh_) >= 60 else "unavailable")
-            diag.update(tws_daily_bars=tws_bar_count, tws_iv_history_rows=tws_iv_count)
+                    brs = []
+                    diag["tws_bars_error"] = str(exc)
+                key = ("ivh", symbol)
+                ivh_ = BARS_CACHE.get(key)
+                if ivh_ is None:
+                    try:
+                        hb = ib.reqHistoricalData(und, "", "252 D", "1 day",
+                                                  "OPTION_IMPLIED_VOLATILITY",
+                                                  useRTH=True, formatDate=1)
+                        ivh_ = [b.close * 100 for b in hb]
+                    except Exception as exc:
+                        ivh_ = []
+                        diag["tws_iv_history_error"] = str(exc)
+                    if ivh_:
+                        BARS_CACHE.put(key, ivh_)
+                if len(brs) < 150:
+                    raise RuntimeError(
+                        f"{symbol}: free history failed ({free_error}); TWS returned "
+                        f"only {len(brs)} daily bars")
+                diag.update(regime_bars_source="TWS daily history",
+                            iv_history_source=("TWS implied-volatility history"
+                                               if len(ivh_) >= 60 else "unavailable"),
+                            tws_daily_bars=len(brs),
+                            tws_iv_history_rows=len(ivh_),
+                            tws_history_requested=True)
+            if ivh_ is None:
+                ivh_ = []
             ib.reqMarketDataType(1 if clock["regular_session"] else 2)
             fallback_iv = (ivh_[-1] / 100 if ivh_ else None)
             sp, sl, ks = build_chain_live(

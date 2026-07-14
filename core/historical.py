@@ -57,8 +57,9 @@ def free_daily_inputs(symbol: str, as_of: date, *, include_as_of: bool = False,
         raise ValueError(f"free daily history is unavailable for {symbol}")
     loader = loader or (lambda ticker, day: list(_yf_history(ticker, day.year)))
     try:
-        price_rows = list(loader(PRICE_TICKER[symbol], as_of))
-        iv_rows = list(loader(IV_TICKER[symbol], as_of))
+        tickers = (PRICE_TICKER[symbol], IV_TICKER[symbol])
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            price_rows, iv_rows = pool.map(lambda ticker: list(loader(ticker, as_of)), tickers)
     except Exception as exc:
         raise RuntimeError(f"free daily-history lookup failed: {exc}") from exc
     accept = ((lambda d: d <= as_of) if include_as_of else (lambda d: d < as_of))

@@ -46,9 +46,15 @@ BARS_CACHE = TTLCache(3600)     # daily bars: 1 h
 PARAMS_CACHE = TTLCache(6 * 3600)
 
 
-def _finish_result(out: dict, timed_out: bool):
+TWS_JOB_TIMEOUT = 75
+TWS_REQUEST_TIMEOUT = 15
+
+
+def _finish_result(out: dict, timed_out: bool, timeout_s: int = TWS_JOB_TIMEOUT):
     if timed_out:
-        raise RuntimeError("TWS request timed out after 120 seconds; reconnect TWS and retry")
+        stage = out.get("stage", "request")
+        raise RuntimeError(f"TWS {stage} timed out after {timeout_s} seconds; "
+                           "check the IB data-farm status and retry")
     if "error" in out:
         raise RuntimeError(out["error"])
     if "result" not in out:
@@ -64,9 +70,13 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
         asyncio.set_event_loop(asyncio.new_event_loop())
         from ib_insync import IB
         ib = IB()
+        ib.RequestTimeout = TWS_REQUEST_TIMEOUT
+        ib.RaiseRequestErrors = True
         try:
+            out["stage"] = "connection"
             ib.connect(host, port, clientId=next(_client_ids), timeout=10)
             out["connected"] = True
+            out["stage"] = "market-data request"
             out["result"] = fn(ib)
         except Exception as e:        # noqa: BLE001 — surfaced to caller
             phase = "request" if out.get("connected") else "connection"
@@ -77,8 +87,8 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
 
     th = threading.Thread(target=target, daemon=True)
     th.start()
-    th.join(timeout=120)
-    return _finish_result(out, th.is_alive())
+    th.join(timeout=TWS_JOB_TIMEOUT)
+    return _finish_result(out, th.is_alive(), TWS_JOB_TIMEOUT)
 
 
 def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT):
