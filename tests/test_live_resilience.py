@@ -93,3 +93,63 @@ def test_off_hours_chain_uses_historical_iv_fallback(monkeypatch):
     assert len(slices) >= 2 and strikes
     assert all(s.atm_iv > .20 for s in slices)
     assert diagnostics["surface_source"] == "historical TWS IV fallback"
+
+
+class _HistorylessIB(_IB):
+    def __init__(self):
+        super().__init__([])
+        self.market_data_type = None
+
+    def reqHistoricalData(self, *_args, **_kwargs):
+        return []
+
+    def reqMarketDataType(self, value):
+        self.market_data_type = value
+
+
+def test_zero_tws_bars_automatically_use_free_regime_history(monkeypatch):
+    import core.context as context_module
+    from core.chain import build_chain_mock
+    from core.regime import mock_bars, mock_iv_hist
+
+    _install_fake_ib(monkeypatch)
+    today = date(2026, 7, 14)
+    bars = mock_bars("SPX", 6000, today, 300)
+    ivh = mock_iv_hist(18, 252)
+    context_module.BARS_CACHE._d.clear()
+    monkeypatch.setattr(context_module, "daily_bars", lambda *_args, **_kw: [])
+    monkeypatch.setattr(context_module, "free_daily_inputs", lambda *_args, **_kw: {
+        "bars": bars, "ivh": ivh, "price_source": "yfinance ^GSPC",
+        "iv_source": "yfinance ^VIX"})
+
+    def chain(_ib, symbol, day, *, fallback_spot, fallback_iv, diagnostics):
+        assert fallback_spot == bars[-1][4]
+        assert fallback_iv == ivh[-1] / 100
+        diagnostics["surface_source"] = "historical TWS IV fallback"
+        return build_chain_mock(symbol, day)
+
+    monkeypatch.setattr(context_module, "build_chain_live", chain)
+    monkeypatch.setattr(context_module, "with_ib",
+                        lambda fn, **_kw: fn(_HistorylessIB()))
+    ctx = context_module.build_context("SPX", "live", today=today)
+    assert ctx.data["tws_daily_bars"] == 0
+    assert ctx.data["regime_bars_source"] == "yfinance ^GSPC fallback"
+    assert ctx.data["iv_history_source"] == "yfinance ^VIX fallback"
+    assert ctx.slices and ctx.regime["iv30"] > 0
+
+
+def test_zero_tws_bars_reports_combined_error_if_free_history_fails(monkeypatch):
+    import core.context as context_module
+
+    _install_fake_ib(monkeypatch)
+    context_module.BARS_CACHE._d.clear()
+    monkeypatch.setattr(context_module, "daily_bars", lambda *_args, **_kw: [])
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("internet unavailable")
+
+    monkeypatch.setattr(context_module, "free_daily_inputs", unavailable)
+    monkeypatch.setattr(context_module, "with_ib",
+                        lambda fn, **_kw: fn(_HistorylessIB()))
+    with pytest.raises(RuntimeError, match="TWS returned 0 daily bars.*internet unavailable"):
+        context_module.build_context("SPX", "live", today=date(2026, 7, 14))

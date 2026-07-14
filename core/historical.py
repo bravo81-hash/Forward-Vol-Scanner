@@ -49,6 +49,28 @@ def _last(rows: list[tuple]) -> float | None:
     return float(rows[-1][4]) if rows else None
 
 
+def free_daily_inputs(symbol: str, as_of: date, *, include_as_of: bool = False,
+                      loader=None) -> dict:
+    """Underlying bars and IV-index closes for a live TWS data fallback."""
+    symbol = symbol.upper()
+    if symbol not in PRICE_TICKER:
+        raise ValueError(f"free daily history is unavailable for {symbol}")
+    loader = loader or (lambda ticker, day: list(_yf_history(ticker, day.year)))
+    try:
+        price_rows = list(loader(PRICE_TICKER[symbol], as_of))
+        iv_rows = list(loader(IV_TICKER[symbol], as_of))
+    except Exception as exc:
+        raise RuntimeError(f"free daily-history lookup failed: {exc}") from exc
+    accept = ((lambda d: d <= as_of) if include_as_of else (lambda d: d < as_of))
+    bars = [row for row in price_rows if accept(row[0])][-320:]
+    ivh = [float(row[4]) for row in iv_rows if accept(row[0])][-252:]
+    if len(bars) < 150:
+        raise RuntimeError(f"free history returned only {len(bars)} price bars for {symbol}")
+    return {"bars": bars, "ivh": ivh,
+            "price_source": f"yfinance {PRICE_TICKER[symbol]}",
+            "iv_source": f"yfinance {IV_TICKER[symbol]}"}
+
+
 def auto_historical_snapshot(symbol: str, as_of: date, loader=None) -> dict:
     symbol = symbol.upper()
     if symbol not in PRICE_TICKER:
