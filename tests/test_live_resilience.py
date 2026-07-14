@@ -26,7 +26,7 @@ def test_tws_missing_result_never_becomes_none_unpack_error():
     assert _finish_result({"result": None}, False) is None
 
 
-def test_every_tws_connection_has_a_per_request_timeout(monkeypatch):
+def test_every_tws_connection_is_bounded_but_tolerates_missing_contracts(monkeypatch):
     module = ModuleType("ib_insync")
 
     class InstantIB:
@@ -45,7 +45,7 @@ def test_every_tws_connection_has_a_per_request_timeout(monkeypatch):
     module.IB = InstantIB
     monkeypatch.setitem(__import__("sys").modules, "ib_insync", module)
     assert with_ib(lambda ib: (ib.RequestTimeout, ib.RaiseRequestErrors)) == (
-        TWS_REQUEST_TIMEOUT, True)
+        TWS_REQUEST_TIMEOUT, False)
 
 
 class _Contract:
