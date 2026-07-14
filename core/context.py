@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 
 from .chain import SURFACE_CFG, build_chain_live, build_chain_mock
-from .events import event_flags, trading_today
+from .events import event_flags, trading_clock, trading_today
 from .ib_client import BARS_CACHE, daily_bars, with_ib
 from .models import Context
 from .regime import build_gates, compute_regime, mock_bars, mock_iv_hist
@@ -33,7 +33,6 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
         ivh = mock_iv_hist(iv30 * 0.96)
     else:
         def job(ib):
-            sp, sl, ks = build_chain_live(ib, symbol, today)
             from ib_insync import Index, Stock
             st, exch, tc, is_idx = SURFACE_CFG[symbol]
             und = Index(symbol, exch, "USD") if is_idx else Stock(symbol, "SMART", "USD")
@@ -47,13 +46,26 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
                                           useRTH=True, formatDate=1)
                 ivh_ = [b.close * 100 for b in hb]
                 BARS_CACHE.put(key, ivh_)
-            return sp, sl, ks, brs, ivh_
+            if len(brs) < 150:
+                raise RuntimeError(f"{symbol}: TWS returned only {len(brs)} daily bars; "
+                                   "check historical-data permissions")
+            clock = trading_clock()
+            ib.reqMarketDataType(1 if clock["regular_session"] else 2)
+            diag = {"market_data_type": "live" if clock["regular_session"] else "frozen"}
+            fallback_iv = (ivh_[-1] / 100 if ivh_ else None)
+            sp, sl, ks = build_chain_live(
+                ib, symbol, today, fallback_spot=brs[-1][4],
+                fallback_iv=fallback_iv, diagnostics=diag)
+            return sp, sl, ks, brs, ivh_, diag
         kw = {}
         if host:
             kw["host"] = host
         if port:
             kw["port"] = port
-        spot, slices, strikes, bars, ivh = with_ib(job, **kw)
+        result = with_ib(job, **kw)
+        if not isinstance(result, tuple) or len(result) != 6:
+            raise RuntimeError("TWS context returned an incomplete result; reconnect and retry")
+        spot, slices, strikes, bars, ivh, live_diag = result
         iv30 = (iv_cm(slices, 30) * 100
                 if slices else (ivh[-1] if ivh else 15.0))
 
@@ -64,6 +76,8 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
     # the last completed session. Flag when it lags the expected session so a
     # holiday/half-day/weekend run can't serve stale numbers as "today".
     data = _freshness(bars, today, mode)
+    if mode == "live":
+        data.update(live_diag)
     ctx = Context(symbol=symbol, spot=spot, today=today, slices=slices,
                   strikes=strikes, regime=reg, events=ev,
                   gates=build_gates(reg, ev, today), mode=mode,

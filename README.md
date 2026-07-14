@@ -25,6 +25,13 @@ Those positions can be recorded as prospective ONE forward tests. A live test
 is out-of-sample evidence only when its rule and parameters were frozen before
 the outcome was observed.
 
+All market dates, DTE calculations, events, and execution windows are anchored
+to `America/New_York`; live captures also store the converted
+`Australia/Melbourne` date/time. Python `zoneinfo` handles daylight-saving
+changes in both locations. Outside New York regular hours the TWS path requests
+frozen quotes and can build the surface from TWS historical IV when current
+option Greeks are unavailable.
+
 ## Run
 ```
 pip install -r requirements.txt

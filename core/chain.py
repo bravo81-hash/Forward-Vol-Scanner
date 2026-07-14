@@ -42,10 +42,19 @@ def k25(spot: float, iv: float, t_yr: float, cp: str,
 
 
 # ------------------------------------------------------------------ LIVE ----
-def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], list[float]]:
-    cached = CHAIN_CACHE.get(symbol)
+def build_chain_live(ib, symbol: str, today: date, *,
+                     fallback_spot: float | None = None,
+                     fallback_iv: float | None = None,
+                     diagnostics: dict | None = None) -> tuple[float, list[Slice], list[float]]:
+    cache_key = (symbol, today)
+    cached = CHAIN_CACHE.get(cache_key)
     if cached:
+        if isinstance(cached, dict):
+            if diagnostics is not None:
+                diagnostics.update(cached.get("diagnostics", {}))
+            return cached["out"]
         return cached
+    diagnostics = diagnostics if diagnostics is not None else {}
     from ib_insync import Index, Option, Stock
     st, exch, tc, is_idx = SURFACE_CFG[symbol]
     und = (Index(symbol, exch, "USD") if is_idx else Stock(symbol, "SMART", "USD"))
@@ -57,18 +66,27 @@ def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], 
         return v if v and not (isinstance(v, float) and math.isnan(v)) and v > 0 else None
 
     spot = (q.get(und.conId) or {}).get("mid")
+    spot_source = "live NBBO"
     if not spot:
         t = ib.reqMktData(und, "", snapshot=False)
         ib.sleep(2)
         spot = _px(t.last) or _px(t.close) or _px(t.marketPrice())
         ib.cancelMktData(und)
+        spot_source = "TWS last/close"
+    if not spot and fallback_spot:
+        spot = float(fallback_spot)
+        spot_source = "prior TWS daily close"
     if not spot:
-        raise RuntimeError(f"{symbol}: no spot (index may not tick premarket)")
+        raise RuntimeError(f"{symbol}: TWS returned no live, frozen, or historical spot")
+    diagnostics["spot_source"] = spot_source
 
     pkey = ("params", symbol)
     chain = PARAMS_CACHE.get(pkey)
     if chain is None:
         chains = ib.reqSecDefOptParams(und.symbol, "", und.secType, und.conId)
+        if not chains:
+            raise RuntimeError(f"{symbol}: TWS returned no option-chain definitions; "
+                               "check API permissions and contract exchange")
         chain = next((c for c in chains if c.tradingClass == tc), chains[0])
         PARAMS_CACHE.put(pkey, chain)
 
@@ -107,6 +125,19 @@ def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], 
             a["spr"].append((r["ask"] - r["bid"]) / r["mid"])
         a["oi"] += r.get("oi") or 0
 
+    live_iv_expiries = sum(bool(a["ivs"]) for a in atm.values())
+    if fallback_iv and 0.01 < fallback_iv < 3:
+        for d, a in atm.items():
+            if not a["ivs"]:
+                # A small square-root slope avoids pretending the historical
+                # fallback is a measured live term structure.
+                a["ivs"].append(float(fallback_iv) * (1 + .02 * math.sqrt((d - today).days / 30)))
+    diagnostics.update(live_iv_expiries=live_iv_expiries,
+                       total_expiries=len(atm),
+                       surface_source=("live TWS IV" if live_iv_expiries == len(atm)
+                                       else "mixed live/frozen + historical IV"
+                                       if live_iv_expiries else "historical TWS IV fallback"))
+
     # pass 2: 25-delta wings
     p2 = []
     for d, a in atm.items():
@@ -139,8 +170,11 @@ def build_chain_live(ib, symbol: str, today: date) -> tuple[float, list[Slice], 
             else:
                 sl.call25_iv, sl.call25_strike = iv or 0.0, ks
         slices.append(sl)
+    if len(slices) < 2:
+        raise RuntimeError(f"{symbol}: TWS returned no usable option IV surface; "
+                           "enable live/frozen market data or verify subscriptions")
     out = (float(spot), slices, strikes)
-    CHAIN_CACHE.put(symbol, out)
+    CHAIN_CACHE.put(cache_key, {"out": out, "diagnostics": dict(diagnostics)})
     return out
 
 

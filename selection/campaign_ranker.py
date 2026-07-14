@@ -232,6 +232,8 @@ def rank_campaign(ctx, intent: str, account: str | None, nlv: float | None,
         card["test_session_id"] = sid
         card["one_recipe"] = {
             "entry_date": ctx.today.isoformat(), "entry_time_et": ctx.data.get("as_of_time", "15:30"),
+            "melbourne_date": ctx.data.get("melbourne_date"),
+            "melbourne_time": ctx.data.get("melbourne_time"),
             "spot": ctx.spot, "instruction": "In ONE choose this date/time, then use the nearest listed expiry and strikes to the model targets.",
         }
 
