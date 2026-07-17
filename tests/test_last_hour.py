@@ -75,5 +75,8 @@ def test_last_hour_page_is_default_and_links_back_to_research():
     page = client.get("/").get_data(as_text=True)
     assert "Last Hour Trade Desk" in page
     assert "15:00–15:40 ET" in page
+    assert 'id="themeToggle"' in page
+    assert 'data-theme="dark"' in page
+    assert "lh-theme" in page
     assert 'href="/research"' in page
     assert "TE Playbook" in client.get("/research").get_data(as_text=True)
