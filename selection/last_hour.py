@@ -6,6 +6,11 @@ TimeZone, with one visible reason for every ENTER/WAIT/LOCKED verdict.
 """
 from __future__ import annotations
 
+from datetime import date
+
+from core.models import Leg
+from core.pricing import q_for, risk_profile
+from execution.optionstrat import optionstrat_url
 from portfolio.governor import evaluate_candidate
 from strategies.last_hour import LAST_HOUR_REGISTRY
 
@@ -193,6 +198,25 @@ def _risk_plan(key: str, card: dict, ctx) -> dict:
     }
 
 
+def attach_trade_tools(card: dict, ctx) -> None:
+    """Attach one canonical OptionStrat link and the repriced risk profile."""
+    legs = [Leg(cp=leg["cp"], strike=float(leg["strike"]),
+                expiry=date.fromisoformat(leg["expiry"]), qty=int(leg["qty"]),
+                iv=float(leg.get("iv") or 0.18))
+            for leg in card["legs_raw"]]
+    card["optionstrat_url"] = optionstrat_url(ctx.symbol, card["legs_raw"])
+    card["risk_profile"] = risk_profile(
+        ctx.spot, legs, ctx.today, entry=float(card["net_mid"]),
+        q=float(getattr(ctx, "q", q_for(ctx.symbol))))
+    # The serialized IVs and displayed cent-rounded entry are the executable
+    # model inputs. Keep every downstream risk number on that exact profile.
+    profile = card["risk_profile"]
+    card["max_profit"] = profile["max_profit"]
+    card["max_loss"] = profile["max_loss"]
+    card["breakevens"] = profile["breakevens"]
+    card["cash_required"] = round(abs(profile["max_loss"]) * 100, 2)
+
+
 def last_hour_decision(ctx, profile: dict, *, preferred: str = "auto",
                        active_time_spread: str = "none", te_completed: int = 0,
                        tz_paper: int = 0, trigger: str = "none") -> dict:
@@ -228,6 +252,7 @@ def last_hour_decision(ctx, profile: dict, *, preferred: str = "auto",
             rank_reason=(reasons[0] if eligible and reasons else waits[0] if waits else "No edge"),
             policy_id="last-hour-v1",
         )
+        attach_trade_tools(card, ctx)
         card["manage"] = _risk_plan(key, card, ctx)
         gov = evaluate_candidate(card, ctx.book, profile["nlv"], ctx.spot, size)
         card["governor"] = gov

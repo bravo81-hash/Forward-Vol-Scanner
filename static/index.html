@@ -308,7 +308,7 @@ function openOS(i){window.open(osUrl(LAST.cards[i]),"_blank");}
 async function payoff(i){
  const c=LAST.cards[i];
  const r=await fetch("/api/payoff",{method:"POST",headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({spot:LAST.spot,legs:c.legs_raw,net_mid:c.net_mid})});
+  body:JSON.stringify({symbol:LAST.symbol,spot:LAST.spot,legs:c.legs_raw,net_mid:c.net_mid})});
  const d=await r.json();const W=420,H=170,pl=44,pb=18;
  const ymax=Math.max(...d.expiry,...d.t5,1),ymin=Math.min(...d.expiry,...d.t5,-1);
  const X=j=>pl+j/(d.x.length-1)*(W-pl-6),Y=p=>6+(ymax-p)/(ymax-ymin)*(H-pb-12);

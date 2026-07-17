@@ -249,7 +249,8 @@ def api_last_hour_decision():
     """Small live/practice desk: three flies plus TimeEdge and TimeZone only."""
     from execution.candidates import persist_cards
     from portfolio.governor import evaluate_candidate
-    from selection.last_hour import PLAYBOOK, _risk_plan, last_hour_decision
+    from selection.last_hour import (PLAYBOOK, _risk_plan, attach_trade_tools,
+                                     last_hour_decision)
 
     symbol = request.args.get("symbol", "SPX").upper().strip()
     mode = request.args.get("mode", "live").lower()
@@ -300,6 +301,7 @@ def api_last_hour_decision():
                                                   out["cards"]))
                 size = "HALF" if symbol == "RUT" or ctx.regime.get("vol_state") == "ELV" else "FULL"
                 for card in out["cards"]:
+                    attach_trade_tools(card, ctx)
                     card["manage"] = _risk_plan(card["strategy"], card, ctx)
                     gov = evaluate_candidate(card, ctx.book, profile["nlv"], ctx.spot, size)
                     card["governor"] = gov
@@ -750,6 +752,8 @@ def api_sentinel():
 
 @app.post("/api/payoff")
 def api_payoff():
+    from core.pricing import risk_profile
+
     d = request.get_json(force=True)
     spot, today = float(d["spot"]), trading_today()
     q = q_for(d.get("symbol", ""))
@@ -758,15 +762,10 @@ def api_payoff():
                 iv=float(leg.get("iv") or 0.18)) for leg in d["legs"]]
     entry = (float(d["net_mid"]) if d.get("net_mid") is not None
              else struct_value(spot, legs, today, q=q))
-    front = min((leg.expiry - today).days for leg in legs)
-    xs, exp, now = [], [], []
-    s = spot * 0.90
-    while s <= spot * 1.10:
-        xs.append(round(s, 1))
-        exp.append(round(struct_value(s, legs, today, elapsed=front, q=q) - entry, 2))
-        now.append(round(struct_value(s, legs, today, elapsed=min(5, front), q=q) - entry, 2))
-        s += spot * 0.004
-    return jsonify({"x": xs, "expiry": exp, "t5": now, "front_dte": front})
+    profile = risk_profile(spot, legs, today, entry=entry, q=q)
+    # Preserve the original endpoint field while exposing the richer profile.
+    profile["expiry"] = profile["front_expiry"]
+    return jsonify(profile)
 
 
 @app.post("/api/stage")

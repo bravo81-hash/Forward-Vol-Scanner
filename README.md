@@ -13,11 +13,18 @@ canonical TimeEdge and progression-gated TimeZone structures:
 * RUT TimeZone 20-point PCS plus OTM put calendar.
 
 The desk shows one primary ENTER/WAIT verdict, graphical bias/IV–RV/term/skew
-and payoff views, exact legs, PT/SL/time stop, one-defense rules, SPX/RUT
+and model risk profiles, exact legs, one-click OptionStrat combos,
+PT/SL/time stop, one-defense rules, SPX/RUT
 differences, and a 15:00–15:40 ET workflow. Live orders are staged
 `transmit=False`; the server still enforces the execution window and the
 portfolio governor. The full scanner remains available at `/research` and the
 campaign laboratory at `/campaigns`.
+
+Single-expiry fly graphs use exact intrinsic payoff at every strike. TimeEdge
+and TimeZone graphs are front-expiry profiles: later-dated calendar legs retain
+Black–Scholes value at their remaining tenor, with entry IV held constant and
+the exact displayed debit/credit used as cost basis. Use the OptionStrat link
+to stress a different future volatility surface before staging.
 
 TWS-connected selection engine for the TE playbook: per ticker it builds
 market context, reads the regime, picks the **top-2 strategy families**
