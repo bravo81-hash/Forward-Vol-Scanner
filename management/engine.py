@@ -48,6 +48,11 @@ def advise_campaign(campaign: dict, mark: dict, context: dict | None = None) -> 
         "call_bwb": ["close/reduce", "recenter call BWB"],
         "target_fly": ["close; no adjustment"],
         "debit_spread": ["close/reduce", "roll only if the new debit improves defined risk"],
+        "fly_bull": ["close/reduce", "one whole-fly reset down above 14 DTE", "second breach exits"],
+        "fly_chop": ["close/reduce", "one whole-fly recenter above 7 DTE", "second breach exits"],
+        "fly_bear": ["close at stop/resistance", "no thesis repair or roll upward"],
+        "timeedge": ["close/reduce", "one predefined same-width recenter", "next breach exits"],
+        "timezone": ["reduce threatened PCS first", "one defense only", "next breach exits whole position"],
     }.get(family, ["close/reduce", "re-evaluate with fresh-entry gates"])
     return {"action": action, "reasons": reasons, "adjustments": adjustments,
             "stage_allowed": False, "policy_id": "campaign-management-v3",

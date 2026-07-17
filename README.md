@@ -1,5 +1,24 @@
 # TE Playbook + Campaign Engine v3
 
+## Last Hour Trade Desk
+
+This branch opens `/` as a focused 15:00–15:40 ET decision surface. It hides
+the broad research registry and evaluates only three regime flies plus the
+canonical TimeEdge and progression-gated TimeZone structures:
+
+* bullish controlled-pullback put BWB;
+* near-balanced put fly for chop;
+* bearish protected debit put BWB;
+* SPX TimeEdge one-sided put calendar; and
+* RUT TimeZone 20-point PCS plus OTM put calendar.
+
+The desk shows one primary ENTER/WAIT verdict, graphical bias/IV–RV/term/skew
+and payoff views, exact legs, PT/SL/time stop, one-defense rules, SPX/RUT
+differences, and a 15:00–15:40 ET workflow. Live orders are staged
+`transmit=False`; the server still enforces the execution window and the
+portfolio governor. The full scanner remains available at `/research` and the
+campaign laboratory at `/campaigns`.
+
 TWS-connected selection engine for the TE playbook: per ticker it builds
 market context, reads the regime, picks the **top-2 strategy families**
 (calendar, double calendar, diagonal, iron condor, put BWB, butterfly),
