@@ -607,7 +607,8 @@ def api_v3_stage():
         if cand["mode"] == "mock":
             log("v3_stage_mock", cand["symbol"], {"candidate_id": cand["id"], "qty": qty})
             result = {"orderId": -1, "status": "MockStaged", "transmit": False,
-                      "candidate_id": cand["id"], "legs": card["legs_raw"]}
+                      "candidate_id": cand["id"], "legs": card["legs_raw"],
+                      "warnings": checked["warnings"]}
             if data.get("campaign_id"):
                 campaign_store().record_order(cand["id"], qty, result, data["campaign_id"])
             return jsonify(result)
@@ -627,7 +628,8 @@ def api_v3_stage():
         log("v3_stage", cand["symbol"], {"candidate_id": cand["id"], **result})
         if data.get("campaign_id"):
             campaign_store().record_order(cand["id"], qty, result, data["campaign_id"])
-        return jsonify({**result, "candidate_id": cand["id"], "transmit": False})
+        return jsonify({**result, "candidate_id": cand["id"], "transmit": False,
+                        "warnings": checked["warnings"]})
     except (KeyError, ValueError, RuntimeError) as exc:
         return jsonify({"error": str(exc)}), 400
 

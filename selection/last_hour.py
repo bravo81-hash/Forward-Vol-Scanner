@@ -297,7 +297,7 @@ def last_hour_decision(ctx, profile: dict, *, preferred: str = "auto",
             {"time": "15:08", "task": "Read bias, ADX, IV–RV, term structure, skew and event gate."},
             {"time": "15:18", "task": "Open the primary card; verify ONE/TWS risk graph and exact-strike IVs."},
             {"time": "15:30", "task": "Stage one limit order untransmitted; review combo, margin and quantity."},
-            {"time": "15:40", "task": "No new entries. Record campaign, PT, SL, time stop and one allowed defense."},
+            {"time": "15:40", "task": "Standard window ends. Outside it, require a special-situation thesis and recheck liquidity."},
         ],
         "cards": cards, "excluded": excluded,
         "notes": [

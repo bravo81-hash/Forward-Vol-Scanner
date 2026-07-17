@@ -78,3 +78,17 @@ def test_execution_window_is_new_york_last_hour():
     assert not within_execution_window(datetime(2026, 7, 13, 14, 59, tzinfo=ny))
     assert not within_execution_window(datetime(2026, 7, 13, 15, 41, tzinfo=ny))
     assert not within_execution_window(datetime(2026, 7, 12, 15, 20, tzinfo=ny))
+
+
+def test_live_staging_outside_window_warns_but_does_not_block(monkeypatch, tmp_path):
+    import execution.candidates as candidates
+
+    store = CampaignStore(tmp_path / "outside-window.sqlite")
+    payload = _payload()
+    payload["mode"] = "live"
+    cid = persist_cards(payload, store)["cards"][0]["candidate_id"]
+    monkeypatch.setattr(candidates, "within_execution_window", lambda: False)
+    checked = validate_for_stage(cid, 1, store)
+    assert checked["quantity"] == 1
+    assert checked["warnings"]
+    assert "Outside the standard" in checked["warnings"][0]

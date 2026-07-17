@@ -47,6 +47,16 @@ NFP_2026 = [date(2026, 1, 9), date(2026, 2, 11), date(2026, 3, 6),
             date(2026, 7, 2), date(2026, 8, 7), date(2026, 9, 4),
             date(2026, 10, 2), date(2026, 11, 6), date(2026, 12, 4)]
 MACRO = {"CPI": CPI_2026, "PPI": PPI_2026, "NFP": NFP_2026}
+TIER1_META = {
+    "FOMC": {"label": "FOMC rate decision", "hour": 14, "minute": 0,
+             "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"},
+    "CPI": {"label": "Consumer Price Index", "hour": 8, "minute": 30,
+            "source": "https://www.bls.gov/schedule/news_release/cpi.htm"},
+    "PPI": {"label": "Producer Price Index", "hour": 8, "minute": 30,
+            "source": "https://www.bls.gov/schedule/news_release/ppi.htm"},
+    "NFP": {"label": "Employment Situation (NFP)", "hour": 8, "minute": 30,
+            "source": "https://www.bls.gov/schedule/news_release/empsit.htm"},
+}
 
 ETFS = {"SPY", "QQQ", "IWM"}
 
@@ -85,6 +95,32 @@ def macro_within(d: date, today: date) -> list[str]:
     return [k for k, dates in MACRO.items() if any(today < x <= d for x in dates)]
 
 
+def upcoming_tier1(today: date, limit: int = 6) -> list[dict]:
+    """Upcoming policy/inflation/jobs events with DST-aware ET/Melbourne times."""
+    calendar = [(day, "FOMC") for day in FOMC_2026]
+    calendar += [(day, kind) for kind, dates in MACRO.items() for day in dates]
+    rows = []
+    for day, kind in sorted(calendar):
+        if day < today:
+            continue
+        meta = TIER1_META[kind]
+        ny = datetime(day.year, day.month, day.day, meta["hour"], meta["minute"],
+                      tzinfo=US_TZ)
+        mel = ny.astimezone(MEL_TZ)
+        dte = (day - today).days
+        rows.append({
+            "kind": kind, "label": meta["label"], "tier": 1, "dte": dte,
+            "date_et": day.isoformat(), "time_et": ny.strftime("%H:%M %Z"),
+            "datetime_et": ny.isoformat(),
+            "date_melbourne": mel.date().isoformat(),
+            "time_melbourne": mel.strftime("%H:%M %Z"),
+            "datetime_melbourne": mel.isoformat(),
+            "urgency": "IMMINENT" if dte <= 2 else "NEAR" if dte <= 10 else "WATCH",
+            "source": meta["source"],
+        })
+    return rows[:limit]
+
+
 def opex_day(y: int, m: int) -> date:
     first = date(y, m, 1)
     off = (4 - first.weekday()) % 7          # weekday(): Mon=0 .. Fri=4
@@ -101,5 +137,6 @@ def event_flags(today: date, symbol: str, front_max_dte: int) -> dict:
             "fomc_in_front": next_fomc_dte(today) <= front_max_dte,
             "macro_dte": macro_dte, "macro_type": macro_type,          # P5
             "macro_in_front": macro_dte <= front_max_dte,               # P5
+            "upcoming_tier1": upcoming_tier1(today),
             "opex_date": ox.isoformat(), "opex_week": week, "post_opex": post,
             "ex_div": symbol in ETFS and qtr and week}

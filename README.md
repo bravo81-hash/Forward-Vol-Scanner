@@ -16,9 +16,10 @@ The desk shows one primary ENTER/WAIT verdict, graphical bias/IV–RV/term/skew
 and model risk profiles, exact legs, one-click OptionStrat combos,
 PT/SL/time stop, one-defense rules, SPX/RUT
 differences, and a 15:00–15:40 ET workflow. Live orders are staged
-`transmit=False`; the server still enforces the execution window and the
-portfolio governor. The full scanner remains available at `/research` and the
-campaign laboratory at `/campaigns`.
+`transmit=False`; the server enforces freshness, eligibility, quantity and the
+portfolio governor. The normal window is advisory: staging outside it remains
+available with a visible special-situation warning. The full scanner remains
+available at `/research` and the campaign laboratory at `/campaigns`.
 
 Single-expiry fly graphs use exact intrinsic payoff at every strike. TimeEdge
 and TimeZone graphs are front-expiry profiles: later-dated calendar legs retain

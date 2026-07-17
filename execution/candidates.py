@@ -49,6 +49,7 @@ def validate_for_stage(candidate_id: str, requested_qty: int,
     # and live-risk blocks remain visible on the card but do not prevent that
     # preview; they are enforced for every non-mock staging request.
     blocks = [] if cand["mode"] == "mock" else list(card.get("blocks") or [])
+    warnings = []
     allowed = int(card.get("governor", {}).get("approved_lots") or 0)
     qty = int(requested_qty)
     if not ctx.get("fresh"):
@@ -60,7 +61,8 @@ def validate_for_stage(candidate_id: str, requested_qty: int,
     if not card.get("tws_stage_allowed", False) and cand["mode"] != "mock":
         blocks.append("strategy evidence status does not permit TWS staging")
     if cand["mode"] != "mock" and not within_execution_window():
-        blocks.append("TWS staging is allowed only 15:00-15:40 ET")
+        warnings.append("Outside the standard 15:00-15:40 ET window; verify the special-situation thesis and liquidity.")
     if blocks:
         raise ValueError("; ".join(dict.fromkeys(blocks)))
-    return {"candidate": cand, "card": card, "quantity": qty}
+    return {"candidate": cand, "card": card, "quantity": qty,
+            "warnings": warnings}

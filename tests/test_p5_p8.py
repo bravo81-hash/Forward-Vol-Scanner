@@ -1,13 +1,12 @@
 """P5-P8 tests. Zero TWS. Dates cross-checked against bls.gov/schedule/2026."""
-import math
 import sys
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.events import (CPI_2026, NFP_2026, PPI_2026, macro_between,
-                         macro_within, next_macro, event_flags)
+                         next_macro, event_flags, upcoming_tier1)
 from core.regime import build_gates, compute_regime, mock_bars, mock_iv_hist
 from core.reprice import assess_liquidity, WING_SPREAD_WARN
 from core.context import build_context
@@ -45,6 +44,19 @@ def test_macro_between_empty_when_no_release_spans():
 def test_event_flags_expose_macro_in_front():
     ev = event_flags(date(2026, 7, 1), "SPX", front_max_dte=21)
     assert ev["macro_type"] == "NFP" and ev["macro_in_front"] is True
+
+
+def test_upcoming_tier1_has_exact_et_and_melbourne_times():
+    rows = upcoming_tier1(date(2026, 7, 17))
+    assert [(row["kind"], row["date_et"]) for row in rows[:4]] == [
+        ("FOMC", "2026-07-29"), ("NFP", "2026-08-07"),
+        ("CPI", "2026-08-12"), ("PPI", "2026-08-13"),
+    ]
+    assert rows[0]["time_et"] == "14:00 EDT"
+    assert rows[0]["date_melbourne"] == "2026-07-30"
+    assert rows[0]["time_melbourne"] == "04:00 AEST"
+    assert rows[1]["time_et"] == "08:30 EDT"
+    assert rows[1]["time_melbourne"] == "22:30 AEST"
 
 
 def test_gate_M_fires_inside_front_window():
