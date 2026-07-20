@@ -33,10 +33,10 @@ def assess_liquidity(legs_raw: list[dict], rows: dict) -> dict:
     missing quote silently kept model prices with no visible flag at all.
     """
     no_quote, wide = [], []
-    for l in legs_raw:
-        key = (l["expiry"], l["strike"], l["cp"])
+    for leg in legs_raw:
+        key = (leg["expiry"], leg["strike"], leg["cp"])
         r = rows.get(key)
-        tag = f"{l['strike']:g}{l['cp']}"
+        tag = f"{leg['strike']:g}{leg['cp']}"
         if not r or r.get("bid") is None or r.get("ask") is None or not r.get("mid"):
             no_quote.append(tag)
             continue
@@ -50,9 +50,12 @@ def assess_liquidity(legs_raw: list[dict], rows: dict) -> dict:
 def reprice_cards(ib, symbol: str, spot: float, today: date,
                   cards: list[dict]) -> None:
     from ib_insync import Option
-    _st, _exch, tc, _idx = SURFACE_CFG[symbol]
-    keys = {(l["expiry"], l["strike"], l["cp"])
-            for c in cards for l in c["legs_raw"]}
+    _st, _exch, tc, _idx = SURFACE_CFG.get(
+        symbol, ("STK", "SMART", symbol, False))
+    tc = next((leg.get("trading_class") for c in cards
+               for leg in c.get("legs_raw", []) if leg.get("trading_class")), tc)
+    keys = {(leg["expiry"], leg["strike"], leg["cp"])
+            for c in cards for leg in c["legs_raw"]}
     opts = {k: Option(symbol, k[0].replace("-", ""), k[1], k[2], "SMART",
                       tradingClass=tc, currency="USD") for k in keys}
     ib.qualifyContracts(*opts.values())
@@ -72,24 +75,27 @@ def reprice_cards(ib, symbol: str, spot: float, today: date,
                                       f"{w['spread_pct']:.0f}% — wide wing, check fill cost")
             c["score"] = round(c["score"] - LIQ_PENALTY, 2)
 
-        legs = [(l, rows.get((l["expiry"], l["strike"], l["cp"])))
-                for l in c["legs_raw"]]
+        legs = [(leg, rows.get((leg["expiry"], leg["strike"], leg["cp"])))
+                for leg in c["legs_raw"]]
         if any(r is None or r.get("mid") is None for _, r in legs):
             c["mid_src"] = "model"
             continue
-        live_mid = round(sum(l["qty"] * r["mid"] for l, r in legs), 2)
+        live_mid = round(sum(leg["qty"] * row["mid"] for leg, row in legs), 2)
         c["model_mid"] = c["net_mid"]
         c["net_mid"] = live_mid
         c["mid_src"] = "live"
         if all(r.get("greeks") for _, r in legs):
             # RiskNav units (x MULT) — matches strategies.base card greeks
-            c["greeks"] = {k: round(sum(l["qty"] * r["greeks"][k]
-                                        for l, r in legs) * MULT, 2)
+            c["greeks"] = {k: round(sum(leg["qty"] * row["greeks"][k]
+                                        for leg, row in legs) * MULT, 2)
                            for k in GREEK_KEYS}
-        leg_objs = [Leg(cp=l["cp"], strike=float(l["strike"]),
-                        expiry=date.fromisoformat(l["expiry"]),
-                        qty=int(l["qty"]), iv=float(l["iv"]))
-                    for l in c["legs_raw"]]
+        for raw, row in legs:
+            if row and row.get("iv"):
+                raw["iv"] = round(float(row["iv"]), 4)
+        leg_objs = [Leg(cp=leg["cp"], strike=float(leg["strike"]),
+                        expiry=date.fromisoformat(leg["expiry"]),
+                        qty=int(leg["qty"]), iv=float(leg["iv"]))
+                    for leg in c["legs_raw"]]
         m = struct_metrics(spot, leg_objs, today, entry=live_mid, q=q_for(symbol))
         c["max_profit"], c["max_loss"] = m["max_profit"], m["max_loss"]
         c["breakevens"] = m["breakevens"]

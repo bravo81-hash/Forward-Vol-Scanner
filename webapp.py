@@ -13,6 +13,7 @@ Run:  python webapp.py
 """
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -64,6 +65,11 @@ def campaigns_page():
 @app.get("/last-hour")
 def last_hour_page():
     return send_from_directory("static", "last_hour.html")
+
+
+@app.get("/stocks")
+def stock_radar_page():
+    return send_from_directory("static", "stock_radar.html")
 
 
 @app.get("/api/status")
@@ -242,6 +248,66 @@ def api_v3_defaults():
     clock = trading_clock()
     return jsonify({"entry_date": clock["ny_date"], "entry_time": "15:30",
                     "timezone": "America/New_York", "clock": clock})
+
+
+@app.get("/api/stocks/latest")
+def api_stocks_latest():
+    from stock_radar import latest_watchlist
+    cadence = request.args.get("cadence", "daily").lower()
+    if cadence not in ("daily", "weekly"):
+        return jsonify({"error": "cadence must be daily or weekly"}), 400
+    try:
+        return jsonify(latest_watchlist(cadence))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+
+
+@app.post("/api/stocks/scan")
+def api_stocks_scan():
+    from stock_radar import run_scan
+    data = request.get_json(silent=True) or {}
+    cadence = str(data.get("cadence", "daily")).lower()
+    source = str(data.get("source", "yf")).lower()
+    limit = data.get("limit")
+    if cadence not in ("daily", "weekly"):
+        return jsonify({"error": "cadence must be daily or weekly"}), 400
+    if source not in ("yf", "mock"):
+        return jsonify({"error": "source must be yf or mock"}), 400
+    try:
+        return jsonify(run_scan(cadence, source, limit))
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:                     # noqa: BLE001
+        return jsonify({"error": f"stock scan failed: {exc}"}), 500
+
+
+@app.get("/api/stocks/monitor")
+def api_stocks_monitor():
+    from stock_radar import monitor
+    cadence = request.args.get("cadence", "daily").lower()
+    mode = request.args.get("mode", "auto").lower()
+    account = request.args.get("account") or None
+    nlv = request.args.get("nlv", type=float)
+    if cadence not in ("daily", "weekly"):
+        return jsonify({"error": "cadence must be daily or weekly"}), 400
+    if mode not in ("auto", "live", "yf", "mock"):
+        return jsonify({"error": "mode must be auto, live, yf, or mock"}), 400
+    try:
+        return jsonify(monitor(cadence, mode, account, nlv))
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:                     # noqa: BLE001
+        return jsonify({"error": f"stock monitor failed: {exc}"}), 500
+
+
+@app.post("/api/stocks/stage")
+def api_stocks_stage():
+    from stock_radar import stage
+    data = request.get_json(force=True)
+    try:
+        return jsonify(stage(data["candidate_id"], int(data.get("quantity", 1))))
+    except (KeyError, ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.get("/api/last-hour/decision")
@@ -784,5 +850,10 @@ def api_stage():
 
 
 if __name__ == "__main__":
-    print("TE Playbook app -> http://127.0.0.1:8765   (mock mode needs no TWS)")
-    app.run(host="127.0.0.1", port=8765, debug=False)
+    from stock_radar import RadarScheduler, scheduler_enabled
+    if scheduler_enabled():
+        RadarScheduler().start()
+    host = os.getenv("FVS_WEB_HOST", "127.0.0.1")
+    port = int(os.getenv("FVS_WEB_PORT", "8765"))
+    print(f"TE Playbook app -> http://{host}:{port}   (mock mode needs no TWS)")
+    app.run(host=host, port=port, debug=False)
