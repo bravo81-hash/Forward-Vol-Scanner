@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import json
+import threading
+import time
 
 from pattern_scanner.patterns import PatternCandidate, classify, detect_all
 from pattern_scanner.scanner import _sector_for, live_pattern_status, scan_patterns
@@ -191,6 +193,52 @@ def test_live_endpoint_rejects_missing_or_expired_scan():
     response = app.test_client().post("/api/patterns/live", json={"scan_id": "missing"})
     assert response.status_code == 409
     assert "Run the daily scan again" in response.get_json()["error"]
+
+
+def test_background_scan_job_avoids_long_lived_http_request(monkeypatch):
+    import pattern_scanner.service as service
+    from webapp import app, _pattern_scan_jobs
+
+    release = threading.Event()
+    expected = {
+        "module": "price_action_patterns", "rows": [], "universe_requested": 2,
+        "symbols_with_bars": 2, "liquid_symbols": 2, "geometry_count": 0,
+        "context_count": 0, "actionable_count": 0,
+    }
+
+    def scan(**kwargs):
+        release.wait(timeout=2)
+        return expected
+
+    _pattern_scan_jobs.clear()
+    monkeypatch.setattr(service, "run_pattern_scan", scan)
+    client = app.test_client()
+    started = client.post("/api/patterns/scan/start?source=mock&tickers=AAPL,MSFT")
+    assert started.status_code == 202
+    job_id = started.get_json()["job_id"]
+    assert client.get(f"/api/patterns/scan/status/{job_id}").status_code == 202
+
+    release.set()
+    for _ in range(100):
+        response = client.get(f"/api/patterns/scan/status/{job_id}")
+        if response.status_code == 200:
+            break
+        time.sleep(.01)
+    assert response.status_code == 200
+    assert response.get_json()["module"] == "price_action_patterns"
+    assert response.get_json()["scan_id"]
+
+
+def test_codespaces_disables_local_tws_validation(monkeypatch):
+    from webapp import app
+
+    monkeypatch.setenv("CODESPACES", "true")
+    capabilities = app.test_client().get("/api/patterns/capabilities")
+    assert capabilities.status_code == 200
+    assert capabilities.get_json()["tws_validation"] is False
+    response = app.test_client().post("/api/patterns/live", json={"scan_id": "unused"})
+    assert response.status_code == 409
+    assert "unavailable in Codespaces" in response.get_json()["error"]
 
 
 def test_stale_breakout_and_target_hit_are_expired():
