@@ -41,6 +41,29 @@ STATUS_BONUS = {
 }
 ACTIONABLE = {"NEAR_TRIGGER", "TRIGGERED_INTRADAY", "CLOSE_CONFIRMED", "RETESTING"}
 
+# These are identities, not return-correlation guesses.  Unknown securities
+# stay labelled Unknown even when a sector ETF is used as a neutral context
+# proxy.  This prevents errors such as XBI being displayed as Industrials.
+KNOWN_ETF_SECTORS = {
+    **SECTOR_ETFS,
+    "XBI": "Health care", "IBB": "Health care", "ARKG": "Health care",
+    "SMH": "Technology", "SOXX": "Technology", "ARKK": "Multi-sector ETF",
+    "XOP": "Energy", "OIH": "Energy", "KRE": "Financials",
+    "XHB": "Consumer discretionary", "ITB": "Consumer discretionary",
+    "GDX": "Materials", "GDXJ": "Materials", "XME": "Materials",
+    "VNQ": "Real estate", "IYR": "Real estate", "TAN": "Energy",
+    "SPY": "Broad market ETF", "QQQ": "Broad market ETF",
+    "IWM": "Broad market ETF", "DIA": "Broad market ETF",
+}
+
+SECTOR_TO_ETF = {
+    "Communication": "XLC", "Consumer discretionary": "XLY",
+    "Consumer staples": "XLP", "Energy": "XLE", "Financials": "XLF",
+    "Health care": "XLV", "Healthcare": "XLV", "Industrials": "XLI",
+    "Defense": "XLI", "Materials": "XLB", "Real estate": "XLRE",
+    "Technology": "XLK", "Semiconductors": "XLK", "Utilities": "XLU",
+}
+
 
 @dataclass
 class PipelineResult:
@@ -107,14 +130,21 @@ def _aligned_score(side: str, bias: str | None):
 
 
 def _sector_for(ticker: str, daily: pd.DataFrame, sectors: dict[str, pd.DataFrame],
-                bench_ret: float | None):
-    """Infer the economic sleeve from 63-day return correlation.
+                bench_ret: float | None, known_sector: str | None = None):
+    """Return an identity-backed sector label and a context proxy.
 
-    This avoids hundreds of slow per-symbol metadata requests.  Low-confidence
-    assignments are labelled Unknown and contribute a neutral context score.
+    Correlation may choose a proxy for scoring, but never changes the displayed
+    economic identity of an unknown ticker.
     """
+    identity = KNOWN_ETF_SECTORS.get(ticker) or known_sector
+    normalized = {"Healthcare": "Health care", "Real Estate": "Real estate",
+                  "Consumer Discretionary": "Consumer discretionary",
+                  "Consumer Staples": "Consumer staples"}.get(identity, identity)
+    known_etf = SECTOR_TO_ETF.get(normalized or "")
     if ticker in sectors:
         chosen, corr = ticker, 1.0
+    elif known_etf in sectors:
+        chosen, corr = known_etf, 1.0
     else:
         tr = daily["close"].pct_change().tail(63)
         chosen, corr = None, -1.0
@@ -124,11 +154,11 @@ def _sector_for(ticker: str, daily: pd.DataFrame, sectors: dict[str, pd.DataFram
             value = float(z.iloc[:, 0].corr(z.iloc[:, 1])) if len(z) >= 30 else np.nan
             if np.isfinite(value) and value > corr:
                 chosen, corr = etf, value
-    if chosen is None or corr < 0.20:
-        return "Unknown", None, corr, 0.5
+    if chosen is None or corr < 0.35:
+        return normalized or "Unknown", None, corr, 0.5, "identity" if normalized else "unknown"
     sret = _returns(sectors[chosen], 63)
     rel = (sret - bench_ret) if sret is not None and bench_ret is not None else sret
-    return SECTOR_ETFS.get(chosen, chosen), rel, corr, None
+    return normalized or "Unknown", rel, corr, None, "identity" if normalized else "correlation_proxy"
 
 
 def _direction_read(d: pd.DataFrame) -> str:
@@ -145,6 +175,7 @@ def _direction_read(d: pd.DataFrame) -> str:
 
 def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
                   sector_daily: dict[str, pd.DataFrame] | None = None,
+                  sector_by_ticker: dict[str, str] | None = None,
                   geometry_limit: int = 100, context_limit: int = 20,
                   final_limit: int = 10, include_forming: bool = False,
                   min_geometry: float = 0.42, min_context: float = 0.40) -> PipelineResult:
@@ -185,8 +216,8 @@ def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
         rp = rs_pct.get(c.ticker, 50)
         rs_score = rp / 100 if c.side == "long" else (100 - rp) / 100
         volume, volx = _volume_score(daily, c.status)
-        sector, sector_rel, sector_corr, neutral_sector = _sector_for(
-            c.ticker, daily, sectors, bench_ret)
+        sector, sector_rel, sector_corr, neutral_sector, sector_source = _sector_for(
+            c.ticker, daily, sectors, bench_ret, (sector_by_ticker or {}).get(c.ticker))
         if neutral_sector is not None:
             sector_score = neutral_sector
         else:
@@ -214,11 +245,20 @@ def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
             "market_bias": bench_bias,
             "market_aligned": market_score == 1.0,
             "sector": sector,
+            "sector_source": sector_source,
             "sector_rel": round(sector_rel * 100, 1) if sector_rel is not None else None,
             "sector_corr": round(sector_corr, 2) if np.isfinite(sector_corr) else None,
             "last": round(float(daily["close"].iloc[-1]), 2),
+            "data_as_of": pd.Timestamp(daily.index[-1]).date().isoformat(),
             "atr": round(float(ind.atr(daily).iloc[-1]), 2),
             "spark": [round(float(x), 4) for x in daily["close"].tail(90)],
+            "chart": {
+                "dates": [pd.Timestamp(x).date().isoformat() for x in daily.tail(220).index],
+                "open": [round(float(x), 4) for x in daily["open"].tail(220)],
+                "high": [round(float(x), 4) for x in daily["high"].tail(220)],
+                "low": [round(float(x), 4) for x in daily["low"].tail(220)],
+                "close": [round(float(x), 4) for x in daily["close"].tail(220)],
+            },
             "review": "REQUIRED",
             "review_reason": "Confirm clean shape, trade location and nearby support/resistance on chart",
             "time_exit": 20,
@@ -237,30 +277,38 @@ def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
 def live_pattern_status(row: dict, live_price: float):
     atr = float(row.get("atr") or 0.0)
     trigger, invalid = float(row["trigger"]), float(row["invalidation"])
+    target = float(row.get("target", float("inf") if row.get("side") == "long"
+                           else float("-inf")))
     side = row["side"]
     if atr <= 0:
         return row.get("status", ""), None
     pen, ret = 0.25 * atr, 0.35 * atr
     if side == "long":
         distance = (trigger - live_price) / atr
-        if live_price < invalid:
+        if live_price >= target or live_price > trigger + 2.0 * atr:
+            status = "EXPIRED"
+        elif live_price < invalid:
             status = "FAILED"
         elif row.get("breakout_age") not in (None, 0) and trigger - ret <= live_price <= trigger + ret:
             status = "RETESTING"
         elif live_price > trigger + pen:
-            status = "TRIGGERED_INTRADAY"
+            status = ("CLOSE_CONFIRMED" if row.get("status") == "CLOSE_CONFIRMED"
+                      else "TRIGGERED_INTRADAY")
         elif abs(trigger - live_price) <= atr:
             status = "NEAR_TRIGGER"
         else:
             status = row.get("status", "FORMING")
     else:
         distance = (live_price - trigger) / atr
-        if live_price > invalid:
+        if live_price <= target or live_price < trigger - 2.0 * atr:
+            status = "EXPIRED"
+        elif live_price > invalid:
             status = "FAILED"
         elif row.get("breakout_age") not in (None, 0) and trigger - ret <= live_price <= trigger + ret:
             status = "RETESTING"
         elif live_price < trigger - pen:
-            status = "TRIGGERED_INTRADAY"
+            status = ("CLOSE_CONFIRMED" if row.get("status") == "CLOSE_CONFIRMED"
+                      else "TRIGGERED_INTRADAY")
         elif abs(live_price - trigger) <= atr:
             status = "NEAR_TRIGGER"
         else:
@@ -288,4 +336,3 @@ def add_live_patterns(rows: list[dict], quotes: dict[str, dict]):
     total = len(rows)
     return rows, {"fresh": fresh, "total": total,
                   "ok": total == 0 or fresh / total >= 0.6}
-
