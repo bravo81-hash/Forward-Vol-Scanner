@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import copy
+import threading
 import time
 import uuid
 from datetime import date, timedelta
@@ -49,30 +50,102 @@ SENTINEL_INVESTING_ACCOUNTS: set[str] = set()
 app = Flask(__name__, static_folder="static")
 
 _PATTERN_SCAN_TTL_S = 30 * 60
+_PATTERN_JOB_TTL_S = 60 * 60
 _pattern_scan_cache: dict[str, tuple[float, dict]] = {}
+_pattern_scan_jobs: dict[str, dict] = {}
+_pattern_state_lock = threading.Lock()
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _pattern_tws_available() -> bool:
+    """Codespaces cannot reach TWS on the user's separate workstation."""
+    return not _truthy_env("CODESPACES") or _truthy_env("PATTERN_TWS_ENABLED")
 
 
 def _cache_pattern_scan(payload: dict) -> str:
     """Keep the latest shortlists in-process for the separate TWS overlay."""
     now = time.monotonic()
-    expired = [key for key, (created, _) in _pattern_scan_cache.items()
-               if now - created > _PATTERN_SCAN_TTL_S]
-    for key in expired:
-        _pattern_scan_cache.pop(key, None)
     scan_id = uuid.uuid4().hex
-    _pattern_scan_cache[scan_id] = (now, copy.deepcopy(payload))
+    with _pattern_state_lock:
+        expired = [key for key, (created, _) in _pattern_scan_cache.items()
+                   if now - created > _PATTERN_SCAN_TTL_S]
+        for key in expired:
+            _pattern_scan_cache.pop(key, None)
+        _pattern_scan_cache[scan_id] = (now, copy.deepcopy(payload))
     return scan_id
 
 
 def _cached_pattern_scan(scan_id: str) -> dict | None:
-    hit = _pattern_scan_cache.get(scan_id)
-    if not hit:
-        return None
-    created, payload = hit
-    if time.monotonic() - created > _PATTERN_SCAN_TTL_S:
-        _pattern_scan_cache.pop(scan_id, None)
-        return None
-    return copy.deepcopy(payload)
+    with _pattern_state_lock:
+        hit = _pattern_scan_cache.get(scan_id)
+        if not hit:
+            return None
+        created, payload = hit
+        if time.monotonic() - created > _PATTERN_SCAN_TTL_S:
+            _pattern_scan_cache.pop(scan_id, None)
+            return None
+        return copy.deepcopy(payload)
+
+
+def _pattern_scan_options() -> dict:
+    raw_tickers = request.args.get("tickers", "")
+    tickers = [value.strip().upper() for value in raw_tickers.split(",") if value.strip()]
+    return {
+        "source": request.args.get("source", "yf").lower(),
+        "tickers": tickers or None,
+        "universe_limit": request.args.get("limit", type=int),
+        "final_limit": request.args.get("final_limit", default=10, type=int),
+        "include_forming": request.args.get("include_forming", "0") == "1",
+        "live": False,
+        "include_earnings": request.args.get("earnings", "1") != "0",
+    }
+
+
+def _run_pattern_scan_job(job_id: str, options: dict) -> None:
+    """Run the long Yahoo scan outside the Codespaces proxy request."""
+    from pattern_scanner.service import run_pattern_scan
+
+    with _pattern_state_lock:
+        _pattern_scan_jobs[job_id]["status"] = "running"
+        _pattern_scan_jobs[job_id]["updated"] = time.monotonic()
+    try:
+        out = run_pattern_scan(**options)
+        out["scan_id"] = _cache_pattern_scan(out)
+        with _pattern_state_lock:
+            _pattern_scan_jobs[job_id].update(
+                status="complete", result=out, updated=time.monotonic())
+    except ValueError as exc:
+        with _pattern_state_lock:
+            _pattern_scan_jobs[job_id].update(
+                status="failed", error=str(exc), status_code=400,
+                updated=time.monotonic())
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("background pattern scan failed")
+        with _pattern_state_lock:
+            _pattern_scan_jobs[job_id].update(
+                status="failed", error=str(exc), status_code=502,
+                updated=time.monotonic())
+
+
+def _start_pattern_scan_job(options: dict) -> str:
+    now = time.monotonic()
+    job_id = uuid.uuid4().hex
+    with _pattern_state_lock:
+        expired = [key for key, job in _pattern_scan_jobs.items()
+                   if now - job["created"] > _PATTERN_JOB_TTL_S]
+        for key in expired:
+            _pattern_scan_jobs.pop(key, None)
+        _pattern_scan_jobs[job_id] = {
+            "status": "queued", "created": now, "updated": now,
+        }
+    threading.Thread(
+        target=_run_pattern_scan_job, args=(job_id, options), daemon=True,
+        name=f"pattern-scan-{job_id[:8]}",
+    ).start()
+    return job_id
 
 
 @app.get("/")
@@ -108,22 +181,11 @@ def pattern_scanner_page():
 
 @app.get("/api/patterns/scan")
 def api_pattern_scan():
-    """Distinct price-action module: bulk geometry, context, then live finalists."""
+    """Synchronous compatibility endpoint; the browser uses background jobs."""
     from pattern_scanner.service import run_pattern_scan
 
-    source = request.args.get("source", "yf").lower()
-    raw_tickers = request.args.get("tickers", "")
-    tickers = [value.strip().upper() for value in raw_tickers.split(",") if value.strip()]
     try:
-        out = run_pattern_scan(
-            source=source,
-            tickers=tickers or None,
-            universe_limit=request.args.get("limit", type=int),
-            final_limit=request.args.get("final_limit", default=10, type=int),
-            include_forming=request.args.get("include_forming", "0") == "1",
-            live=request.args.get("live", "0") == "1",
-            include_earnings=request.args.get("earnings", "1") != "0",
-        )
+        out = run_pattern_scan(**_pattern_scan_options())
         out["scan_id"] = _cache_pattern_scan(out)
         return jsonify(out)
     except ValueError as exc:
@@ -133,11 +195,44 @@ def api_pattern_scan():
         return jsonify({"error": str(exc)}), 502
 
 
+@app.post("/api/patterns/scan/start")
+def api_pattern_scan_start():
+    """Return immediately while a long Yahoo scan runs in the background."""
+    job_id = _start_pattern_scan_job(_pattern_scan_options())
+    return jsonify({"job_id": job_id, "status": "queued"}), 202
+
+
+@app.get("/api/patterns/scan/status/<job_id>")
+def api_pattern_scan_status(job_id: str):
+    with _pattern_state_lock:
+        job = copy.deepcopy(_pattern_scan_jobs.get(job_id))
+    if job is None:
+        return jsonify({"error": "The scan job was not found. Run the scan again."}), 404
+    if job["status"] == "failed":
+        return jsonify({"error": job["error"], "status": "failed"}), job["status_code"]
+    if job["status"] == "complete":
+        return jsonify(job["result"])
+    return jsonify({"job_id": job_id, "status": job["status"]}), 202
+
+
+@app.get("/api/patterns/capabilities")
+def api_pattern_capabilities():
+    available = _pattern_tws_available()
+    return jsonify({
+        "tws_validation": available,
+        "tws_reason": (None if available else
+                       "TWS validation is unavailable in Codespaces because TWS is not running on the Codespaces server."),
+    })
+
+
 @app.post("/api/patterns/live")
 def api_pattern_live():
     """Overlay TWS quotes on the cached finalists; never repeat the bulk scan."""
     from pattern_scanner.service import validate_pattern_rows
 
+    if not _pattern_tws_available():
+        return jsonify({"error":
+                        "TWS validation is unavailable in Codespaces. Run the Yahoo daily scan here; validate through TWS only when the app is running on the same computer as TWS."}), 409
     data = request.get_json(silent=True) or {}
     scan_id = str(data.get("scan_id") or "")
     cached = _cached_pattern_scan(scan_id)
