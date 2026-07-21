@@ -9,7 +9,7 @@ import pandas as pd
 
 from core.events import trading_today
 from core.stock_data import earnings_date_yf, histories_yf
-from pattern_scanner.scanner import SECTOR_ETFS, add_live_patterns, scan_patterns
+from pattern_scanner.scanner import ACTIONABLE, SECTOR_ETFS, add_live_patterns, scan_patterns
 from pattern_scanner.universe import universe_for
 from selection.stock_radar import load_universe
 
@@ -121,11 +121,17 @@ def run_pattern_scan(*, source: str = "yf", tickers: list[str] | None = None,
         symbols = universe_for("us")
     if universe_limit:
         symbols = symbols[:max(1, int(universe_limit))]
+    universe_meta = {row["symbol"].upper(): row for row in load_universe()}
+    sector_by_ticker = {symbol: str(meta.get("sector"))
+                        for symbol, meta in universe_meta.items() if meta.get("sector")}
     fetch = list(dict.fromkeys([*symbols, "SPY", *SECTOR_ETFS]))
     if source == "mock":
         histories = _pattern_mock_histories(fetch, today)
     else:
-        histories = histories_yf(fetch, period="2y", completed_only=live)
+        # Geometry is always built from completed sessions.  During the last
+        # hour, TWS supplies a separate live quote overlay; Yahoo's unfinished
+        # candle must never masquerade as close confirmation.
+        histories = histories_yf(fetch, period="2y", completed_only=True)
     frames = {symbol: _frame(bars) for symbol, bars in histories.items() if bars}
     liquid = {symbol: frames[symbol] for symbol in symbols
               if symbol in frames and _liquid(frames[symbol])}
@@ -134,6 +140,7 @@ def run_pattern_scan(*, source: str = "yf", tickers: list[str] | None = None,
     result = scan_patterns(
         liquid, bench_daily=frames.get("SPY"),
         sector_daily={symbol: frames[symbol] for symbol in SECTOR_ETFS if symbol in frames},
+        sector_by_ticker=sector_by_ticker,
         geometry_limit=geometry_limit, context_limit=context_limit,
         final_limit=final_limit, include_forming=include_forming,
     )
@@ -142,11 +149,14 @@ def run_pattern_scan(*, source: str = "yf", tickers: list[str] | None = None,
     if include_earnings and rows:
         rows, excluded = _earnings(rows, today, source)
     live_health = None
+    live_excluded = 0
     if live and rows:
         from core.ib_client import with_ib
         from core.stock_data import quotes_tws
         quotes = with_ib(lambda ib: quotes_tws(ib, [row["ticker"] for row in rows]))
         rows, live_health = add_live_patterns(rows, quotes)
+        live_excluded = sum(row.get("live_status") not in ACTIONABLE for row in rows)
+        rows = [row for row in rows if row.get("live_status") in ACTIONABLE]
     rows.sort(key=lambda row: row["score"], reverse=True)
     for rank, row in enumerate(rows, 1):
         row["rank"] = rank
@@ -154,12 +164,17 @@ def run_pattern_scan(*, source: str = "yf", tickers: list[str] | None = None,
     return {
         "module": "price_action_patterns", "source": source,
         "session": today.isoformat(), "universe_requested": len(symbols),
+        "data_as_of": max((frame.index[-1].date().isoformat() for frame in frames.values()),
+                          default=None),
+        "price_adjustment": "split-and-dividend adjusted",
         "symbols_with_bars": sum(symbol in frames for symbol in symbols),
         "liquid_symbols": len(liquid), "geometry_count": result.geometry_count,
         "context_count": result.context_count, "actionable_count": result.actionable_count,
-        "earnings_excluded": excluded, "live_health": live_health,
+        "earnings_excluded": excluded, "live_excluded": live_excluded,
+        "live_health": live_health,
         "rows": rows,
-        "architecture": ["bulk adjusted OHLCV", "pattern geometry",
+        "architecture": ["completed split-adjusted daily OHLCV", "pattern geometry",
                          "momentum + relative strength + volume + market/sector context",
-                         "3-10 actionable candidates", "visual review", "TWS final validation"],
+                         "lifecycle and price-order sanity gates", "3-10 candidates",
+                         "mandatory visual review", "separate TWS intraday validation"],
     }
