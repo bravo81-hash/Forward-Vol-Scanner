@@ -5,7 +5,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from core.events import trading_clock
-from core.ib_client import TWS_REQUEST_TIMEOUT, _finish_result, with_ib
+from core.ib_client import (TWS_REQUEST_TIMEOUT, _connection_error,
+                            _finish_result, with_ib)
 
 
 def test_ny_melbourne_clock_handles_both_dst_seasons():
@@ -46,6 +47,42 @@ def test_every_tws_connection_is_bounded_but_tolerates_missing_contracts(monkeyp
     monkeypatch.setitem(__import__("sys").modules, "ib_insync", module)
     assert with_ib(lambda ib: (ib.RequestTimeout, ib.RaiseRequestErrors)) == (
         TWS_REQUEST_TIMEOUT, False)
+
+
+def test_timeout_connection_error_identifies_endpoint_and_settings():
+    message = _connection_error("127.0.0.1", 7496, 7100, TimeoutError())
+    assert "handshake timed out" in message
+    assert "127.0.0.1:7496" in message
+    assert "client ID 7100" in message
+    assert "Enable ActiveX and Socket Clients" in message
+
+
+def test_timeout_connection_is_retried_with_a_new_client_id(monkeypatch):
+    module = ModuleType("ib_insync")
+    attempted = []
+
+    class RetryIB:
+        RequestTimeout = 0
+        RaiseRequestErrors = False
+
+        def connect(self, _host, _port, clientId, **_kwargs):
+            attempted.append(clientId)
+            if len(attempted) == 1:
+                raise TimeoutError()
+            self.connected = True
+
+        def isConnected(self):
+            return getattr(self, "connected", False)
+
+        def disconnect(self):
+            self.connected = False
+
+    module.IB = RetryIB
+    monkeypatch.setitem(__import__("sys").modules, "ib_insync", module)
+    monkeypatch.setattr("core.ib_client.time.sleep", lambda _seconds: None)
+    assert with_ib(lambda _ib: "connected") == "connected"
+    assert len(attempted) == 2
+    assert attempted[1] == attempted[0] + 1
 
 
 class _Contract:
