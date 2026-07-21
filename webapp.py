@@ -14,6 +14,9 @@ Run:  python webapp.py
 from __future__ import annotations
 
 import os
+import copy
+import time
+import uuid
 from datetime import date, timedelta
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -44,6 +47,32 @@ SYMBOLS = ["SPX", "SPY", "QQQ", "RUT", "IWM"]
 SENTINEL_INVESTING_ACCOUNTS: set[str] = set()
 
 app = Flask(__name__, static_folder="static")
+
+_PATTERN_SCAN_TTL_S = 30 * 60
+_pattern_scan_cache: dict[str, tuple[float, dict]] = {}
+
+
+def _cache_pattern_scan(payload: dict) -> str:
+    """Keep the latest shortlists in-process for the separate TWS overlay."""
+    now = time.monotonic()
+    expired = [key for key, (created, _) in _pattern_scan_cache.items()
+               if now - created > _PATTERN_SCAN_TTL_S]
+    for key in expired:
+        _pattern_scan_cache.pop(key, None)
+    scan_id = uuid.uuid4().hex
+    _pattern_scan_cache[scan_id] = (now, copy.deepcopy(payload))
+    return scan_id
+
+
+def _cached_pattern_scan(scan_id: str) -> dict | None:
+    hit = _pattern_scan_cache.get(scan_id)
+    if not hit:
+        return None
+    created, payload = hit
+    if time.monotonic() - created > _PATTERN_SCAN_TTL_S:
+        _pattern_scan_cache.pop(scan_id, None)
+        return None
+    return copy.deepcopy(payload)
 
 
 @app.get("/")
@@ -95,10 +124,32 @@ def api_pattern_scan():
             live=request.args.get("live", "0") == "1",
             include_earnings=request.args.get("earnings", "1") != "0",
         )
+        out["scan_id"] = _cache_pattern_scan(out)
         return jsonify(out)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("pattern scan failed")
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.post("/api/patterns/live")
+def api_pattern_live():
+    """Overlay TWS quotes on the cached finalists; never repeat the bulk scan."""
+    from pattern_scanner.service import validate_pattern_rows
+
+    data = request.get_json(silent=True) or {}
+    scan_id = str(data.get("scan_id") or "")
+    cached = _cached_pattern_scan(scan_id)
+    if cached is None:
+        return jsonify({"error": "The scan expired or the app restarted. Run the daily scan again."}), 409
+    try:
+        rows, health, excluded = validate_pattern_rows(cached.get("rows") or [])
+        cached.update(rows=rows, live_health=health, live_excluded=excluded,
+                      scan_id=scan_id)
+        return jsonify(cached)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("pattern live validation failed")
         return jsonify({"error": str(exc)}), 502
 
 
