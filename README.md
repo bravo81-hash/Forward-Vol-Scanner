@@ -154,6 +154,13 @@ $env:FVS_TWS_PORT = "7497"
 python webapp.py
 ```
 
+If live monitoring reports a connection-handshake timeout, verify in TWS under
+**Configure > API > Settings** that socket clients are enabled, the Socket port
+matches `FVS_TWS_PORT`, and `127.0.0.1` is trusted. Wait until TWS is fully
+logged in before starting the app. The app makes two bounded connection attempts
+with non-colliding client IDs; use `FVS_TWS_CLIENT_ID_BASE` only if another local
+API program already reserves the default 7100-series IDs.
+
 ## Last Hour Trade Desk
 
 This branch opens `/` as a focused 15:00–15:40 ET decision surface. It hides
