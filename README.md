@@ -1,5 +1,33 @@
 # TE Playbook + Campaign Engine v3
 
+## Price-Action Pattern Scanner
+
+Open `/patterns` for the distinct chart-pattern module inside this application.
+It scans liquid US stocks with bulk daily OHLCV, ranks deterministic geometry,
+then applies momentum, relative strength, volume, broad-market and sector
+context. Only the final shortlist is sent to TWS for live-price validation.
+
+Patterns include flat base/VCP, cup and handle, inverse head and shoulders,
+double bottom, ascending triangle, head and shoulders top, double top, bull
+flag and bear flag. Rows are separated into forming, near-trigger,
+close-confirmed, retesting and live intraday-trigger states. Every result
+remains a visual-review candidate rather than an automatic trade.
+
+Quick test:
+
+```powershell
+cd Forward-Vol-Scanner
+.\.venv\Scripts\Activate.ps1
+python -m pytest tests/test_pattern_scanner.py -q
+python pattern_scan.py --source mock --limit 30
+python webapp.py
+```
+
+Then open `http://127.0.0.1:8765/patterns`, select **Practice**, and run the
+scan. For real daily data select **Yahoo daily**. During 15:00–15:40 ET, with
+TWS running, use **Validate finalists with TWS**; TWS is never used to crawl
+the full historical universe.
+
 ## Stock Opportunity Radar
 
 Open `/stocks` for an automatic single-stock options watchlist. It scans the
