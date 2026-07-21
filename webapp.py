@@ -72,6 +72,36 @@ def stock_radar_page():
     return send_from_directory("static", "stock_radar.html")
 
 
+@app.get("/patterns")
+def pattern_scanner_page():
+    return send_from_directory("static", "pattern_scanner.html")
+
+
+@app.get("/api/patterns/scan")
+def api_pattern_scan():
+    """Distinct price-action module: bulk geometry, context, then live finalists."""
+    from pattern_scanner.service import run_pattern_scan
+
+    source = request.args.get("source", "yf").lower()
+    raw_tickers = request.args.get("tickers", "")
+    tickers = [value.strip().upper() for value in raw_tickers.split(",") if value.strip()]
+    try:
+        out = run_pattern_scan(
+            source=source,
+            tickers=tickers or None,
+            universe_limit=request.args.get("limit", type=int),
+            final_limit=request.args.get("final_limit", default=10, type=int),
+            include_forming=request.args.get("include_forming", "0") == "1",
+            live=request.args.get("live", "0") == "1",
+            include_earnings=request.args.get("earnings", "1") != "0",
+        )
+        return jsonify(out)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 502
+
+
 @app.get("/api/status")
 def api_status():
     return jsonify({"symbols": SYMBOLS, "tws": f"{DEFAULT_HOST}:{DEFAULT_PORT}"})
