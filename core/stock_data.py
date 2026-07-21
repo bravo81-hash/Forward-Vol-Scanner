@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from core.events import trading_today, upcoming_tier1
+from core.price_action import enrich_ideas, fetch_feed, practice_feed
 from selection.stock_radar import (ACTIVE_LIMIT, POOL_LIMIT, RESEARCH_LIMIT,
                                    POLICY_ID, analyse_symbol, apply_earnings,
                                    load_universe, rank_ideas)
@@ -186,6 +187,11 @@ def scan_stocks(*, cadence: str = "daily", source: str = "yf",
     enriched = [apply_earnings(x, events.get(x["symbol"]), today) for x in pre]
     ranked_all = rank_ideas(enriched, cadence, previous_symbols,
                             RESEARCH_LIMIT, research=True)
+    if source == "mock":
+        pa_payload, pa_meta = practice_feed(ranked_all)
+    else:
+        pa_payload, pa_meta = fetch_feed()
+    ranked_all, pa_meta = enrich_ideas(ranked_all, pa_payload, pa_meta)
     display_limit = min(max(int(limit or POOL_LIMIT), ACTIVE_LIMIT), POOL_LIMIT)
     ranked = []
     for i, idea in enumerate(ranked_all[:display_limit], 1):
@@ -201,6 +207,7 @@ def scan_stocks(*, cadence: str = "daily", source: str = "yf",
         "active_limit": min(ACTIVE_LIMIT, len(ranked)), "pool_limit": len(ranked),
         "research_limit": len(research_pool), "limit": len(ranked),
         "candidates": ranked, "research_pool": research_pool,
+        "price_action_feed": pa_meta,
         "upcoming_tier1": upcoming_tier1(today),
         "criteria": {
             "hard_filters": ["price >= $15", "20-day dollar volume >= $50m",

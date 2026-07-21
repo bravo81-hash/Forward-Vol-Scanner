@@ -1,5 +1,5 @@
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.events import macro_risk_gate
+from core.price_action import enrich_ideas, validate_feed
 from core.reprice import assess_liquidity
 from core.stock_data import scan_stocks
 from execution.stock_orders import approve_lots, make_stageable
@@ -24,6 +25,8 @@ def test_mock_scan_returns_active_five_and_up_to_five_reserves():
     assert all(x["list_role"] == "ACTIVE" for x in out["candidates"][:5])
     assert all(x["list_role"] == "RESERVE" for x in out["candidates"][5:])
     assert len(out["research_pool"]) >= len(out["candidates"])
+    assert out["price_action_feed"]["status"] == "PRACTICE"
+    assert out["price_action_feed"]["authority"] == "SHADOW_ONLY"
     for idea in out["candidates"]:
         assert idea["session"] == "2026-07-20"
         assert idea["score"] <= 100
@@ -31,6 +34,39 @@ def test_mock_scan_returns_active_five_and_up_to_five_reserves():
         assert idea["tradingview_url"].startswith("https://www.tradingview.com/")
         assert "optionstrat.com/build/custom" in idea["strategy"]["optionstrat_url"]
         assert len(idea["strategy"]["legs_raw"]) == 2
+
+
+def test_price_action_feed_is_freshness_checked_and_context_only():
+    now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
+    base = {"schema_version": 1, "market": "us", "authority": "context_only",
+            "generated": "2026-07-20T23:30:00Z", "rows": []}
+    assert validate_feed(base, now=now)["status"] == "FRESH"
+    stale = {**base, "generated": "2026-07-10T23:30:00Z"}
+    assert validate_feed(stale, now=now)["status"] == "STALE"
+    with pytest.raises(ValueError, match="context-only"):
+        validate_feed({**base, "authority": "orders"}, now=now)
+
+
+def test_price_action_annotations_do_not_modify_primary_score_or_rank():
+    ideas = [
+        {"symbol": "A", "direction": "BULL", "score": 91.0, "rank": 1},
+        {"symbol": "B", "direction": "BEAR", "score": 88.0, "rank": 2},
+        {"symbol": "C", "direction": "BULL", "score": 86.0, "rank": 3},
+        {"symbol": "D", "direction": "BULL", "score": 84.0, "rank": 4},
+    ]
+    feed = {"bench": {"state": "CHOP_NO_EDGE"}, "rows": [
+        {"ticker": "A", "signal": "S1", "side": "long", "evidence_tier": "CONTEXT"},
+        {"ticker": "B", "signal": "S2", "side": "long", "evidence_tier": "CAUTION"},
+        {"ticker": "C", "signal": "S3", "side": "neutral", "evidence_tier": "PREFERRED"},
+        {"ticker": "D", "signal": "S4", "side": "long", "evidence_tier": "EXPERIMENTAL"},
+    ]}
+    out, meta = enrich_ideas(ideas, feed, {"status": "FRESH"})
+    assert [x["score"] for x in out] == [91.0, 88.0, 86.0, 84.0]
+    assert [x["rank"] for x in out] == [1, 2, 3, 4]
+    assert [x["price_action"]["status"] for x in out] == [
+        "CONFIRM", "CONFLICT", "NEUTRAL_RESEARCH", "EXPERIMENTAL"]
+    assert out[0]["price_action"]["shadow_score"] == 93.0
+    assert meta["matched_count"] == 4 and meta["authority"] == "SHADOW_ONLY"
 
 
 def test_weekly_scan_is_capped_at_ten_and_diversified():
@@ -212,6 +248,7 @@ def test_stock_radar_endpoints_mock(monkeypatch, tmp_path):
     payload = scan.get_json()
     assert payload["snapshot_id"].startswith("RAD-")
     assert len(payload["candidates"]) <= 10
+    assert payload["price_action_feed"]["status"] == "PRACTICE"
 
     latest = client.get("/api/stocks/latest?cadence=daily").get_json()
     assert latest["snapshot_id"] == payload["snapshot_id"]
@@ -219,6 +256,7 @@ def test_stock_radar_endpoints_mock(monkeypatch, tmp_path):
         "/api/stocks/monitor?cadence=daily&mode=mock&account=MOCK-A&nlv=100000"
     ).get_json()
     assert monitored["mode"] == "mock" and monitored["triggered"] == 1
+    assert monitored["price_action_feed"]["status"] == "PRACTICE"
     first = monitored["candidates"][0]
     assert first["monitor"]["state"] == "TRIGGERED"
     assert first["trade_card"]["candidate_id"]

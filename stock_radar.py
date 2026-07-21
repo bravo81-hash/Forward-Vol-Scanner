@@ -309,6 +309,10 @@ def monitor(cadence: str = "daily", mode: str = "auto", account: str | None = No
             "clock": clock, "standard_window": within_execution_window(),
             "upcoming_tier1": watch.get("upcoming_tier1", []),
             "macro_gate": gate, "caught_up": caught_up,
+            "price_action_feed": watch.get("price_action_feed", {
+                "status": "UNAVAILABLE", "authority": "SHADOW_ONLY",
+                "matched_count": 0,
+            }),
             "selection": selection_meta or {"phase": "BASELINE", "challenger_checked": False},
             "entry_usage": radar_store().entry_usage(account or "MOCK-A", clock["ny_date"]),
             "evidence": radar_store().evidence_summary(),

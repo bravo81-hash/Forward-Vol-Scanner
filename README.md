@@ -70,6 +70,15 @@ means the next trading-day close returned through the trigger, or invalidation
 was hit before target. This evidence determines whether five, ten or the
 challenger model should eventually be promoted.
 
+Price-Action supplies a separate, versioned US context feed after its scheduled
+scan. Radar validates its schema and timestamp, then records S1/S2 directional
+confirmation or conflict, S3 neutral research context and S4 experimental
+context beside each matching ticker. These annotations are **shadow only**:
+they do not change the primary score, rank, trigger, risk gate or staging
+permission. The integration fails open if the feed is missing, malformed or
+more than 96 hours old. Override the public feed URL with
+`FVS_PRICE_ACTION_FEED`; set it to `off` to disable the context layer.
+
 Run the desk and open it directly:
 
 ```text
