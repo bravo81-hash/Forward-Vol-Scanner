@@ -3,15 +3,20 @@
 ## Price-Action Pattern Scanner
 
 Open `/patterns` for the distinct chart-pattern module inside this application.
-It scans liquid US stocks with bulk daily OHLCV, ranks deterministic geometry,
-then applies momentum, relative strength, volume, broad-market and sector
-context. Only the final shortlist is sent to TWS for live-price validation.
+It scans liquid US stocks with completed, split-adjusted daily OHLCV, applies
+chronological detector rules plus lifecycle and price-order sanity gates, then
+ranks geometry with momentum, relative strength, volume, broad-market and
+identity-backed sector context. Only the final shortlist is sent to TWS for a
+separate live-price overlay.
 
 Patterns include flat base/VCP, cup and handle, inverse head and shoulders,
 double bottom, ascending triangle, head and shoulders top, double top, bull
 flag and bear flag. Rows are separated into forming, near-trigger,
-close-confirmed, retesting and live intraday-trigger states. Every result
-remains a visual-review candidate rather than an automatic trade.
+close-confirmed, retesting and live intraday-trigger states. Confirmations
+expire after three completed bars unless price is making a valid retest; setups
+also expire after ten bars, a 2-ATR extension, or target achievement. Every row
+includes pattern dates, pivot dates and an inspectable chart. Ranking scores are
+heuristics—not probabilities—and every result requires visual review.
 
 Quick test:
 

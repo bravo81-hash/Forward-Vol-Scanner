@@ -3,7 +3,7 @@ import pandas as pd
 import json
 
 from pattern_scanner.patterns import PatternCandidate, classify, detect_all
-from pattern_scanner.scanner import live_pattern_status, scan_patterns
+from pattern_scanner.scanner import _sector_for, live_pattern_status, scan_patterns
 
 
 def bars(close, volume=None):
@@ -123,8 +123,11 @@ def test_pipeline_returns_only_actionable_by_default_and_scores_context():
     if result.rows:
         row = result.rows[0]
         assert 0 <= row["context_score"] <= 1
-        assert row["sector"] == "Technology"
+        assert row["sector"] == "Unknown"  # correlation is a proxy, never an identity label
+        assert row["sector_source"] == "correlation_proxy"
         assert row["review"] == "REQUIRED"
+        assert row["chart"]["dates"]
+        assert all("date" in point for point in row["points"].values())
 
 
 def test_live_overlay_separates_intraday_trigger_from_close_confirmation():
@@ -150,6 +153,92 @@ def test_pattern_module_page_and_api(monkeypatch):
     response = client.get("/api/patterns/scan?source=mock&tickers=AAPL,MSFT")
     assert response.status_code == 200
     assert response.get_json()["module"] == "price_action_patterns"
+
+
+def test_stale_breakout_and_target_hit_are_expired():
+    stale = bars(np.r_[np.full(90, 99.0), 101.0, np.full(6, 101.2)])
+    c = PatternCandidate("X", "P1", "Base", "long", .8, 100, 95, 120, 70, 89)
+    classify(c, stale, atr=2.0)
+    assert c.breakout_age == 6
+    assert c.status == "EXPIRED"
+
+    reached = bars(np.r_[np.full(95, 99.0), 101.0, 103.2])
+    c2 = PatternCandidate("X", "P1", "Base", "long", .8, 100, 95, 103, 70, 94)
+    classify(c2, reached, atr=2.0)
+    assert c2.status == "EXPIRED"
+
+
+def test_xbi_regression_old_triangle_is_expired_not_actionable():
+    # Regression for the reported XBI false positive: 154.51 current versus a
+    # 137.13 trigger and 149.19 target.  The target is already behind price.
+    d = bars(np.r_[np.full(94, 135.0), 138.0, 145.0, 150.0, 154.51])
+    xbi = PatternCandidate("XBI", "P5", "Ascending triangle", "long", .917,
+                           137.13, 130.0, 149.19, 60, 93)
+    classify(xbi, d, atr=4.63)
+    assert xbi.status == "EXPIRED"
+
+
+def test_price_ordering_sanity_gate_rejects_impossible_levels():
+    d = bars(np.linspace(95, 101, 100))
+    invalid = PatternCandidate("X", "P5", "Ascending triangle", "long", .9,
+                               100, 102, 110, 60, 95)
+    classify(invalid, d, atr=2.0)
+    assert invalid.status == "INVALID"
+
+
+def test_old_triangle_cannot_be_promoted_after_extension():
+    prior = np.linspace(70, 92, 70)
+    seq = []
+    for low in (90, 92, 94, 96):
+        seq.extend(np.linspace(seq[-1] if seq else 92, 100, 6))
+        seq.extend(np.linspace(100, low, 6))
+    # The textbook triangle broke long ago and price is now far beyond both
+    # trigger and measured target.  It must not reappear as actionable.
+    old = bars(np.r_[prior, seq, np.linspace(101, 125, 30)])
+    assert not any(x.code == "P5" for x in detect_all("OLD", old))
+
+
+def test_known_etf_sector_identity_is_not_guessed_by_correlation():
+    d = bars(np.linspace(100, 110, 100))
+    sector, _, _, _, source = _sector_for("XBI", d, {"XLI": d, "XLV": d}, 0.0)
+    assert sector == "Health care"
+    assert source == "identity"
+
+
+def test_yahoo_history_requests_adjusted_prices(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from core.stock_data import histories_yf
+
+    captured = {}
+    frame = pd.DataFrame({"Open": [99.0], "High": [101.0], "Low": [98.0],
+                          "Close": [100.0], "Volume": [1_000_000]},
+                         index=pd.to_datetime(["2026-07-21"]))
+
+    def download(*args, **kwargs):
+        captured.update(kwargs)
+        return frame
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
+    out = histories_yf(["ABC"], completed_only=False)
+    assert captured["auto_adjust"] is True
+    assert out["ABC"][0]["close"] == 100.0
+
+
+def test_pattern_service_always_requests_completed_daily_bars(monkeypatch):
+    import pattern_scanner.service as service
+
+    called = {}
+    def stop_after_fetch(*args, **kwargs):
+        called.update(kwargs)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(service, "histories_yf", stop_after_fetch)
+    try:
+        service.run_pattern_scan(source="yf", tickers=["AAPL"], include_earnings=False)
+    except RuntimeError as exc:
+        assert str(exc) == "stop"
+    assert called["completed_only"] is True
 
 
 if __name__ == "__main__":

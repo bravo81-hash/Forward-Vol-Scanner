@@ -31,6 +31,10 @@ class PatternCandidate:
     status: str = "FORMING"
     distance_atr: float | None = None
     breakout_age: int | None = None
+    breakout_date: str | None = None
+    bars_since_completion: int | None = None
+    start_date: str | None = None
+    end_date: str | None = None
     volume_confirmed: bool = False
     detail: str = ""
     points: dict = field(default_factory=dict)
@@ -45,6 +49,8 @@ class PatternCandidate:
                 return int(value)
             if isinstance(value, np.floating):
                 return float(value)
+            if isinstance(value, (pd.Timestamp, np.datetime64)):
+                return pd.Timestamp(value).date().isoformat()
             return value
         return native(asdict(self))
 
@@ -75,9 +81,9 @@ def _between(points: Iterable[tuple[int, float]], lo: int, hi: int):
     return [(i, p) for i, p in points if lo < i < hi]
 
 
-def _recent_cross_age(close: np.ndarray, trigger: float, side: str,
-                      penetration: float, start_bar: int = 0) -> int | None:
-    """Age of the latest material break formed during this pattern.
+def _breakout_info(close: np.ndarray, trigger: float, side: str,
+                   penetration: float, start_bar: int = 0) -> tuple[int | None, int | None]:
+    """Age and bar of the latest *crossing event* during this pattern.
 
     Earlier history often traded beyond today's trigger (notably before a cup,
     double bottom, or reversal).  Counting those bars would mislabel an
@@ -86,16 +92,21 @@ def _recent_cross_age(close: np.ndarray, trigger: float, side: str,
     """
     start = max(0, min(int(start_bar), len(close) - 1))
     window = close[start:]
-    if side == "long":
-        hits = np.where(window > trigger + penetration)[0]
-    else:
-        hits = np.where(window < trigger - penetration)[0]
-    return int(len(window) - 1 - hits[-1]) if len(hits) else None
+    beyond = (window > trigger + penetration if side == "long"
+              else window < trigger - penetration)
+    # Counting every bar beyond the trigger resets age to zero forever.  A
+    # breakout is the transition from not-beyond to beyond.
+    crosses = np.where(beyond & ~np.r_[False, beyond[:-1]])[0]
+    if not len(crosses):
+        return None, None
+    bar = start + int(crosses[-1])
+    return int(len(close) - 1 - bar), bar
 
 
 def classify(candidate: PatternCandidate, d: pd.DataFrame, atr: float,
              near_atr: float = 1.0, penetration_atr: float = 0.25,
-             retest_atr: float = 0.35) -> PatternCandidate:
+             retest_atr: float = 0.35, max_confirm_age: int = 3,
+             max_retest_age: int = 10, max_extension_atr: float = 2.0) -> PatternCandidate:
     """Attach a mutually-exclusive setup state using daily closes only.
 
     ``TRIGGERED_INTRADAY`` is reserved for the TWS live overlay.  A one-cent
@@ -109,17 +120,42 @@ def classify(candidate: PatternCandidate, d: pd.DataFrame, atr: float,
     vol_avg = float(np.nanmean(vol[-21:-1])) if len(vol) > 21 else float(np.nanmean(vol))
     candidate.volume_confirmed = bool(vol_avg > 0 and vol[-1] >= 1.2 * vol_avg)
     pen, ret = penetration_atr * atr, retest_atr * atr
-    age = _recent_cross_age(
-        close, candidate.trigger, candidate.side, pen, candidate.start_bar)
+    candidate.start_date = pd.Timestamp(d.index[candidate.start_bar]).date().isoformat()
+    candidate.end_date = pd.Timestamp(d.index[candidate.end_bar]).date().isoformat()
+    candidate.bars_since_completion = len(d) - 1 - candidate.end_bar
+    if candidate.side == "long":
+        valid_order = candidate.invalidation < candidate.trigger < candidate.target
+    else:
+        valid_order = candidate.target < candidate.trigger < candidate.invalidation
+    if not valid_order or abs(candidate.trigger - candidate.invalidation) < 0.5 * atr:
+        candidate.status = "INVALID"
+        return candidate
+
+    age, breakout_bar = _breakout_info(
+        close, candidate.trigger, candidate.side, pen,
+        candidate.start_bar)
     candidate.breakout_age = age
+    if breakout_bar is not None:
+        candidate.breakout_date = pd.Timestamp(d.index[breakout_bar]).date().isoformat()
+
+    target_hit = False
+    if breakout_bar is not None:
+        after = d.iloc[breakout_bar:]
+        target_hit = (float(after["high"].max()) >= candidate.target if candidate.side == "long"
+                      else float(after["low"].min()) <= candidate.target)
 
     if candidate.side == "long":
         candidate.distance_atr = round((candidate.trigger - last) / atr, 2)
-        if last < candidate.invalidation:
+        extension = (last - candidate.trigger) / atr
+        if target_hit or extension > max_extension_atr or (age is not None and age > max_retest_age):
+            status = "EXPIRED"
+        elif last < candidate.invalidation:
             status = "FAILED"
-        elif age is not None and 0 < age <= 10 and last >= candidate.trigger - ret and last <= candidate.trigger + ret:
+        elif age is not None and 0 < age <= max_retest_age and candidate.trigger - ret <= last <= candidate.trigger + ret:
             status = "RETESTING"
-        elif last > candidate.trigger + pen:
+        elif age is not None and age > max_confirm_age:
+            status = "EXPIRED"
+        elif age is not None and age <= max_confirm_age and last > candidate.trigger + pen:
             status = "CLOSE_CONFIRMED"
         elif abs(candidate.trigger - last) <= near_atr * atr:
             status = "NEAR_TRIGGER"
@@ -127,11 +163,16 @@ def classify(candidate: PatternCandidate, d: pd.DataFrame, atr: float,
             status = "FORMING"
     else:
         candidate.distance_atr = round((last - candidate.trigger) / atr, 2)
-        if last > candidate.invalidation:
+        extension = (candidate.trigger - last) / atr
+        if target_hit or extension > max_extension_atr or (age is not None and age > max_retest_age):
+            status = "EXPIRED"
+        elif last > candidate.invalidation:
             status = "FAILED"
-        elif age is not None and 0 < age <= 10 and last <= candidate.trigger + ret and last >= candidate.trigger - ret:
+        elif age is not None and 0 < age <= max_retest_age and candidate.trigger - ret <= last <= candidate.trigger + ret:
             status = "RETESTING"
-        elif last < candidate.trigger - pen:
+        elif age is not None and age > max_confirm_age:
+            status = "EXPIRED"
+        elif age is not None and age <= max_confirm_age and last < candidate.trigger - pen:
             status = "CLOSE_CONFIRMED"
         elif abs(last - candidate.trigger) <= near_atr * atr:
             status = "NEAR_TRIGGER"
@@ -147,6 +188,29 @@ def _candidate(ticker, code, name, side, score, trigger, invalidation,
                          round(float(trigger), 4), round(float(invalidation), 4),
                          round(float(target), 4), int(start), int(end),
                          detail=detail, points=points)
+    # Make every detector auditable in the UI.  Existing detector point values
+    # are mapped to the nearest bar inside the formation and emitted with dates.
+    enriched = {}
+    span = d.iloc[max(0, int(start)):min(len(d), int(end) + 1)]
+    for label, value in points.items():
+        exact_bar = None
+        if isinstance(value, (tuple, list)) and len(value) == 2:
+            exact_bar, value = int(value[0]), value[1]
+        price = float(value)
+        if span.empty:
+            continue
+        if exact_bar is None:
+            delta = pd.concat([(span["high"] - price).abs(),
+                               (span["low"] - price).abs(),
+                               (span["close"] - price).abs()], axis=1).min(axis=1)
+            stamp = delta.idxmin()
+            bar = int(d.index.get_loc(stamp))
+        else:
+            bar = max(0, min(exact_bar, len(d) - 1))
+            stamp = d.index[bar]
+        enriched[label] = {"bar": bar, "date": pd.Timestamp(stamp).date().isoformat(),
+                           "price": round(price, 4)}
+    c.points = enriched
     return classify(c, d, atr)
 
 
@@ -176,7 +240,6 @@ def flat_base(ticker: str, d: pd.DataFrame, atr: float):
         prior_ret = float(prior.iloc[-1] / prior.iloc[0] - 1) if len(prior) > 20 else 0.0
         if prior_ret < 0.05 or contract < 0.05:
             continue
-        lows = np.minimum.accumulate(l[::-1])[::-1]
         compression = _clip(contract / 0.50)
         score = 0.30 * _clip(touches / 4) + 0.30 * compression + 0.20 * _clip(prior_ret / 0.25) + 0.20 * _clip((0.22 - width) / 0.18)
         start = len(d) - w
@@ -184,7 +247,7 @@ def flat_base(ticker: str, d: pd.DataFrame, atr: float):
                           trigger, floor - 0.25 * atr, trigger + (trigger - floor),
                           start, len(d) - 1,
                           f"{w}d base; {touches} resistance tests; range contracted {contract:.0%}",
-                          {"resistance": round(trigger, 2), "support": round(floor, 2)}, d, atr)
+                          {"resistance": trigger, "support": floor}, d, atr)
         if best is None or cand.geometry_score > best.geometry_score:
             best = cand
     return best
@@ -220,6 +283,7 @@ def cup_handle(ticker: str, d: pd.DataFrame, atr: float):
         if not (5 <= len(handle) <= 30):
             continue
         handle_low = float(handle["low"].min())
+        handle_low_bar = len(d) - w + int(handle["low"].argmin()) + right
         handle_high = float(handle["high"].max())
         handle_depth = (rim - handle_low) / rim
         if handle_depth < -0.03 or handle_depth > min(0.18, depth * 0.55):
@@ -240,10 +304,12 @@ def cup_handle(ticker: str, d: pd.DataFrame, atr: float):
         start = len(d) - w + left
         cand = _candidate(ticker, "P2", "Cup and handle", "long", score,
                           trigger, handle_low - 0.25 * atr,
-                          trigger + (trigger - bottom), start, len(d) - 1,
+                          trigger + (trigger - bottom), start, handle_low_bar,
                           f"cup depth {depth:.0%}; handle {handle_depth:.0%}; rim gap {symmetry:.1%}",
-                          {"left_rim": round(rim1, 2), "bottom": round(bottom, 2),
-                           "right_rim": round(rim2, 2), "handle_low": round(handle_low, 2)}, d, atr)
+                          {"left_rim": (len(d) - w + left, rim1),
+                           "bottom": (len(d) - w + trough, bottom),
+                           "right_rim": (len(d) - w + right, rim2),
+                           "handle_low": (handle_low_bar, handle_low)}, d, atr)
         if best is None or cand.geometry_score > best.geometry_score:
             best = cand
     return best
@@ -289,17 +355,23 @@ def _three_pivot_reversal(ticker, d, atr, bullish=True):
         if bullish:
             cand = _candidate(ticker, "P3", "Inverse head and shoulders", "long", score,
                               trigger, min(s1[1], s3[1]) - 0.25 * atr,
-                              trigger + height, off + s1[0], len(d) - 1,
+                              trigger + height, off + s1[0], off + s3[0],
                               f"head {head_prom:.1%} below shoulders; neckline slope {slope:.3f}/bar",
-                              {"left_shoulder": round(s1[1], 2), "head": round(s2[1], 2),
-                               "right_shoulder": round(s3[1], 2)}, d, atr)
+                              {"left_shoulder": (off + s1[0], s1[1]),
+                               "head": (off + s2[0], s2[1]),
+                               "right_shoulder": (off + s3[0], s3[1]),
+                               "neckline_left": (off + p1[0], p1[1]),
+                               "neckline_right": (off + p2[0], p2[1])}, d, atr)
         else:
             cand = _candidate(ticker, "P6", "Head and shoulders top", "short", score,
                               trigger, max(s1[1], s3[1]) + 0.25 * atr,
-                              trigger - height, off + s1[0], len(d) - 1,
+                              trigger - height, off + s1[0], off + s3[0],
                               f"head {head_prom:.1%} above shoulders; neckline slope {slope:.3f}/bar",
-                              {"left_shoulder": round(s1[1], 2), "head": round(s2[1], 2),
-                               "right_shoulder": round(s3[1], 2)}, d, atr)
+                              {"left_shoulder": (off + s1[0], s1[1]),
+                               "head": (off + s2[0], s2[1]),
+                               "right_shoulder": (off + s3[0], s3[1]),
+                               "neckline_left": (off + p1[0], p1[1]),
+                               "neckline_right": (off + p2[0], p2[1])}, d, atr)
         if best is None or cand.geometry_score > best.geometry_score:
             best = cand
     return best
@@ -352,10 +424,11 @@ def _double(ticker, d, atr, bullish=True):
             code, name, side = "P7", "Double top", "short"
         score = 0.38 * _clip(1 - similarity / 0.055) + 0.32 * _clip(depth / 0.18) + 0.30 * _clip(broad / 4)
         cand = _candidate(ticker, code, name, side, score, mid[1], invalid,
-                          target, off + s1[0], len(d) - 1,
+                          target, off + s1[0], off + s2[0],
                           f"peaks/troughs {similarity:.1%} apart; {sep} bars; depth {depth:.0%}",
-                          {"first": round(s1[1], 2), "middle": round(mid[1], 2),
-                           "second": round(s2[1], 2)}, d, atr)
+                          {"first": (off + s1[0], s1[1]),
+                           "middle": (off + mid[0], mid[1]),
+                           "second": (off + s2[0], s2[1])}, d, atr)
         if best is None or cand.geometry_score > best.geometry_score:
             best = cand
     return best
@@ -370,36 +443,73 @@ def double_top(ticker, d, atr):
 
 
 def ascending_triangle(ticker, d, atr):
+    """Horizontal ceiling plus a chronological sequence of rising lows.
+
+    The structure must finish near the current bar.  Lows are taken only from
+    the intervals between/after the selected ceiling tests, preventing an old
+    resistance cluster from being combined with unrelated post-breakout lows.
+    """
     if len(d) < 100 or atr <= 0:
         return None
     best = None
     for w in (35, 50, 70, 90):
         x = d.tail(w)
         ph, pl = _pivots(x, 2, 2)
-        if len(ph) < 2 or len(pl) < 2:
+        if len(ph) < 3 or len(pl) < 3:
             continue
-        resistance = float(np.median([p for _, p in ph[-4:]]))
-        tol = max(0.015 * resistance, 0.55 * atr)
-        tests = [(i, p) for i, p in ph if abs(p - resistance) <= tol]
-        if len(tests) < 2:
-            continue
-        lows = [(i, p) for i, p in pl if i >= tests[0][0] - 5]
-        if len(lows) < 2 or lows[-1][1] <= lows[-2][1]:
-            continue
-        rise = (lows[-1][1] - lows[0][1]) / max(lows[0][1], 1e-9)
-        height = resistance - min(p for _, p in lows)
-        if rise < 0.02 or height < 2 * atr:
-            continue
-        dispersion = np.std([p for _, p in tests]) / resistance
-        score = 0.35 * _clip(len(tests) / 4) + 0.35 * _clip(rise / 0.12) + 0.30 * _clip(1 - dispersion / 0.02)
-        off = len(d) - w
-        cand = _candidate(ticker, "P5", "Ascending triangle", "long", score,
-                          resistance, lows[-1][1] - 0.25 * atr,
-                          resistance + height, off + min(tests[0][0], lows[0][0]), len(d) - 1,
-                          f"{len(tests)} ceiling tests; lows rose {rise:.1%}",
-                          {"resistance": round(resistance, 2), "last_low": round(lows[-1][1], 2)}, d, atr)
-        if best is None or cand.geometry_score > best.geometry_score:
-            best = cand
+        for end_i in range(2, len(ph)):
+            tests = ph[max(0, end_i - 3):end_i + 1]
+            if len(tests) < 3:
+                continue
+            resistance = float(np.median([p for _, p in tests]))
+            tol = max(0.20 * atr, min(0.008 * resistance, 0.35 * atr))
+            tests = [(i, p) for i, p in tests if abs(p - resistance) <= tol]
+            if len(tests) < 3:
+                continue
+            # One trough between each ceiling test and one after the last.
+            lows = []
+            for left, right in zip(tests, tests[1:]):
+                interval = _between(pl, left[0], right[0])
+                if not interval:
+                    lows = []
+                    break
+                lows.append(min(interval, key=lambda z: z[1]))
+            after = [(i, p) for i, p in pl if tests[-1][0] < i <= tests[-1][0] + 20]
+            if not lows or not after:
+                continue
+            lows.append(min(after, key=lambda z: z[1]))
+            values = np.asarray([p for _, p in lows], dtype=float)
+            if len(values) < 3 or np.any(np.diff(values) < 0.20 * atr):
+                continue
+            rise = (values[-1] - values[0]) / max(values[0], 1e-9)
+            height = resistance - values[0]
+            first_gap, last_gap = resistance - values[0], resistance - values[-1]
+            if rise < 0.02 or height < 2 * atr or last_gap > 0.75 * first_gap:
+                continue
+            # No close may materially break the ceiling before the final low;
+            # that would contaminate the formation with post-breakout pivots.
+            prebreak = x["close"].iloc[tests[0][0]:lows[-1][0] + 1]
+            if bool((prebreak > resistance + 0.25 * atr).any()):
+                continue
+            dispersion = float(np.std([p for _, p in tests]) / resistance)
+            if dispersion > 0.008:
+                continue
+            score = (0.30 * _clip(len(tests) / 4)
+                     + 0.35 * _clip(rise / 0.12)
+                     + 0.20 * _clip(1 - dispersion / 0.008)
+                     + 0.15 * _clip(1 - last_gap / first_gap))
+            off = len(d) - w
+            cand = _candidate(ticker, "P5", "Ascending triangle", "long", score,
+                              resistance, values[-1] - 0.25 * atr,
+                              resistance + height,
+                              off + min(tests[0][0], lows[0][0]), off + lows[-1][0],
+                              f"{len(tests)} ceiling tests; {len(lows)} consecutive rising lows; lows rose {rise:.1%}",
+                              {**{f"ceiling_{j + 1}": (off + i, p)
+                                  for j, (i, p) in enumerate(tests)},
+                               **{f"rising_low_{j + 1}": (off + i, p)
+                                  for j, (i, p) in enumerate(lows)}}, d, atr)
+            if best is None or cand.geometry_score > best.geometry_score:
+                best = cand
     return best
 
 
@@ -442,7 +552,7 @@ def flag(ticker, d, atr):
                 code, name = "P9", "Bear flag"
             score = 0.35 * _clip((pole_atr - 2.5) / 4) + 0.35 * _clip(1 - retrace / 0.52) + 0.30 * _clip((vol_contract + 0.1) / 0.5)
             cand = _candidate(ticker, code, name, side, score, trigger, invalid,
-                              target, start, len(d) - 1,
+                              target, start, end + flag_n - 1,
                               f"{pole_n}d pole {pole_pct:.0%}; {flag_n}d flag; retrace {retrace:.0%}; volume {vol_contract:.0%} lower",
                               {"pole_start": round(c[start], 2), "pole_end": round(c[end - 1], 2)}, d, atr)
             if best is None or cand.geometry_score > best.geometry_score:
@@ -471,10 +581,13 @@ def detect_all(ticker: str, daily: pd.DataFrame) -> list[PatternCandidate]:
     if len(d) < 90 or atr <= 0:
         return []
     found = []
+    completion_limits = {"P1": 5, "P2": 20, "P3": 35, "P4": 35,
+                         "P5": 15, "P6": 35, "P7": 35, "P8": 5, "P9": 5}
     for detector in DETECTORS:
         try:
             c = detector(ticker, d, atr)
-            if c is not None and c.status != "FAILED":
+            if (c is not None and c.status not in {"FAILED", "INVALID", "EXPIRED"}
+                    and (c.bars_since_completion or 0) <= completion_limits.get(c.code, 20)):
                 found.append(c)
         except Exception:
             continue

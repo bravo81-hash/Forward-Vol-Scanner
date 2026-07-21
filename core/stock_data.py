@@ -48,7 +48,9 @@ def histories_yf(symbols: list[str], period: str = "2y", *,
     except ImportError as exc:
         raise RuntimeError("yfinance is not installed") from exc
     unique = list(dict.fromkeys([s.upper() for s in symbols]))
-    data = yf.download(unique, period=period, interval="1d", auto_adjust=False,
+    # Pattern geometry must be split/dividend adjusted.  Unadjusted history can
+    # manufacture false gaps, bases and measured-move targets around splits.
+    data = yf.download(unique, period=period, interval="1d", auto_adjust=True,
                        group_by="ticker", progress=False, threads=True)
     result = {}
     multi = getattr(data.columns, "nlevels", 1) > 1
