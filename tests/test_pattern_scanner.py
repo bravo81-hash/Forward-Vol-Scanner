@@ -153,6 +153,44 @@ def test_pattern_module_page_and_api(monkeypatch):
     response = client.get("/api/patterns/scan?source=mock&tickers=AAPL,MSFT")
     assert response.status_code == 200
     assert response.get_json()["module"] == "price_action_patterns"
+    assert response.get_json()["scan_id"]
+
+
+def test_live_endpoint_reuses_cached_shortlist_without_rerunning_scan(monkeypatch):
+    import pattern_scanner.service as service
+    from webapp import app, _pattern_scan_cache
+
+    expected = {
+        "module": "price_action_patterns", "rows": [{"ticker": "AAPL", "score": .8}],
+        "universe_requested": 1, "symbols_with_bars": 1, "liquid_symbols": 1,
+        "geometry_count": 1, "context_count": 1, "actionable_count": 1,
+    }
+    calls = {"scan": 0, "live": 0}
+    def scan(**kwargs):
+        calls["scan"] += 1
+        return expected
+    def live(rows):
+        calls["live"] += 1
+        return [{**rows[0], "live": 200.0, "live_status": "NEAR_TRIGGER"}], {"fresh": 1, "total": 1, "ok": True}, 0
+
+    _pattern_scan_cache.clear()
+    monkeypatch.setattr(service, "run_pattern_scan", scan)
+    monkeypatch.setattr(service, "validate_pattern_rows", live)
+    client = app.test_client()
+    daily = client.get("/api/patterns/scan?source=mock")
+    scan_id = daily.get_json()["scan_id"]
+    response = client.post("/api/patterns/live", json={"scan_id": scan_id})
+    assert response.status_code == 200
+    assert response.get_json()["rows"][0]["live"] == 200.0
+    assert calls == {"scan": 1, "live": 1}
+
+
+def test_live_endpoint_rejects_missing_or_expired_scan():
+    from webapp import app, _pattern_scan_cache
+    _pattern_scan_cache.clear()
+    response = app.test_client().post("/api/patterns/live", json={"scan_id": "missing"})
+    assert response.status_code == 409
+    assert "Run the daily scan again" in response.get_json()["error"]
 
 
 def test_stale_breakout_and_target_hit_are_expired():
@@ -222,6 +260,8 @@ def test_yahoo_history_requests_adjusted_prices(monkeypatch):
     monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
     out = histories_yf(["ABC"], completed_only=False)
     assert captured["auto_adjust"] is True
+    assert captured["timeout"] == 20
+    assert captured["threads"] == 8
     assert out["ABC"][0]["close"] == 100.0
 
 
