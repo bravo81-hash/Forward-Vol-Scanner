@@ -9,6 +9,7 @@ TWS limits respected here:
 """
 from __future__ import annotations
 import asyncio
+import itertools
 import math
 import os
 import threading
@@ -20,7 +21,11 @@ QUOTE_TIMEOUT = 8.0
 
 DEFAULT_HOST = os.getenv("FVS_TWS_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.getenv("FVS_TWS_PORT", "7496"))  # 7497 = paper
-_client_ids = iter(lambda: int(time.time() * 10) % 800 + 100, None)
+CLIENT_ID_BASE = int(os.getenv("FVS_TWS_CLIENT_ID_BASE", "7100"))
+CONNECT_TIMEOUT = float(os.getenv("FVS_TWS_CONNECT_TIMEOUT", "15"))
+CONNECT_ATTEMPTS = max(1, int(os.getenv("FVS_TWS_CONNECT_ATTEMPTS", "2")))
+_client_ids = itertools.count(CLIENT_ID_BASE)
+_client_id_lock = threading.Lock()
 
 
 class TTLCache:
@@ -51,6 +56,31 @@ TWS_JOB_TIMEOUT = 75
 TWS_REQUEST_TIMEOUT = 15
 
 
+def _next_client_id() -> int:
+    """Return a process-unique ID so simultaneous web requests cannot collide."""
+    with _client_id_lock:
+        return next(_client_ids)
+
+
+def _connection_error(host: str, port: int, client_id: int, exc: Exception) -> str:
+    endpoint = f"{host}:{port} (client ID {client_id})"
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return (
+            f"TWS connection handshake timed out at {endpoint}. "
+            "TWS accepted no complete API handshake. Confirm that TWS is fully logged in, "
+            "Configure > API > Settings has 'Enable ActiveX and Socket Clients' enabled, "
+            f"the Socket port is {port}, and 127.0.0.1 is trusted; then restart TWS and the app."
+        )
+    if isinstance(exc, (ConnectionRefusedError, OSError)):
+        return (
+            f"TWS is not accepting an API connection at {endpoint}: "
+            f"{type(exc).__name__}: {exc}. Check that the app and TWS are on the same computer "
+            f"and that the configured Socket port is {port}."
+        )
+    detail = str(exc).strip() or "no detail returned"
+    return f"TWS connection failed at {endpoint}: {type(exc).__name__}: {detail}"
+
+
 def _finish_result(out: dict, timed_out: bool, timeout_s: int = TWS_JOB_TIMEOUT):
     if timed_out:
         stage = out.get("stage", "request")
@@ -70,26 +100,38 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
     def target():
         asyncio.set_event_loop(asyncio.new_event_loop())
         from ib_insync import IB
-        ib = IB()
-        ib.RequestTimeout = TWS_REQUEST_TIMEOUT
-        # Contract discovery is intentionally tolerant. IB returns error 200
-        # for some unavailable expiry/strike combinations even when the rest
-        # of the option chain is valid; ib_insync then leaves those contracts
-        # unqualified so callers can filter conId == 0. Raising here would
-        # abort the complete live scan on the first unusable combination.
-        ib.RaiseRequestErrors = False
-        try:
-            out["stage"] = "connection"
-            ib.connect(host, port, clientId=next(_client_ids), timeout=10)
-            out["connected"] = True
-            out["stage"] = "market-data request"
-            out["result"] = fn(ib)
-        except Exception as e:        # noqa: BLE001 — surfaced to caller
-            phase = "request" if out.get("connected") else "connection"
-            out["error"] = f"TWS {phase} failed: {type(e).__name__}: {e}"
-        finally:
-            if ib.isConnected():
-                ib.disconnect()
+        ib = None
+        for attempt in range(1, CONNECT_ATTEMPTS + 1):
+            out.pop("error", None)
+            ib = IB()
+            ib.RequestTimeout = TWS_REQUEST_TIMEOUT
+            # Contract discovery is intentionally tolerant. IB returns error 200
+            # for some unavailable expiry/strike combinations even when the rest
+            # of the option chain is valid; ib_insync then leaves those contracts
+            # unqualified so callers can filter conId == 0. Raising here would
+            # abort the complete live scan on the first unusable combination.
+            ib.RaiseRequestErrors = False
+            client_id = _next_client_id()
+            try:
+                out["stage"] = "connection"
+                ib.connect(host, port, clientId=client_id, timeout=CONNECT_TIMEOUT)
+                out["connected"] = True
+                out["stage"] = "market-data request"
+                out["result"] = fn(ib)
+                break
+            except Exception as e:        # noqa: BLE001 — surfaced to caller
+                if out.get("connected"):
+                    detail = str(e).strip() or "no detail returned"
+                    out["error"] = f"TWS request failed: {type(e).__name__}: {detail}"
+                    break
+                out["error"] = _connection_error(host, port, client_id, e)
+                retryable = isinstance(e, (TimeoutError, asyncio.TimeoutError))
+                if not retryable or attempt >= CONNECT_ATTEMPTS:
+                    break
+                time.sleep(0.75)
+            finally:
+                if ib.isConnected():
+                    ib.disconnect()
 
     th = threading.Thread(target=target, daemon=True)
     th.start()
