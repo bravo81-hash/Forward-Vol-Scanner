@@ -1,5 +1,131 @@
 # TE Playbook + Campaign Engine v3
 
+## Stock Opportunity Radar
+
+Open `/stocks` for an automatic single-stock options watchlist. It scans the
+curated liquid-options universe in `config/stock_universe.yaml` after each US
+session. V2 displays five active names plus up to five reserves and retains the
+top 20 internally for research. Friday's pool is also saved, but its technical
+levels are refreshed from the latest completed session before it can be used.
+
+Startup is adaptive. If the computer was off after the prior close, the first
+monitor request builds the missing previous-close baseline automatically. At
+14:45 ET, or immediately when the app starts later, it compares the wider pool
+with the active five and then freezes the session list. Up to two materially
+better challengers can alert in **shadow mode**; they cannot stage live orders
+until their logged out-of-sample evidence is explicitly promoted.
+
+The scanner first requires at least 220 daily bars, price of at least $15,
+20-session average dollar volume of at least $50m, ATR/price no greater than 8%,
+and membership in the maintained optionable universe.  It recognises only four
+triggerable structures: aligned-trend breakout, pullback reclaim, breakdown,
+and failed rally.  Candidates then receive a transparent 100-point score:
+
+| Component | Maximum | Why it is included |
+| --- | ---: | --- |
+| Trend and structure | 25 | Avoid fighting the 50/200-day regime; ADX rewards a cleaner trend. |
+| Trigger readiness | 20 | Prefer a setup close enough to act on, without entering early. |
+| Liquidity | 15 | Underlying dollar-volume capacity proxy; the exact option NBBO is checked at trigger time. |
+| Relative strength vs SPY | 15 | Select leaders for bullish trades and laggards for bearish trades. |
+| Momentum and volume | 10 | Require the move to have confirmation rather than price alone. |
+| Defined-risk payoff | 10 | Require approximately 2:1 underlying reward/risk. |
+| Confirming candle | 5 | Small timing confirmation; never allowed to dominate the setup. |
+
+Friday ranking can add or subtract up to five points for 60-day relative
+strength.  A two-point carry-over bonus reduces unnecessary daily churn.
+Known earnings inside the intended 30-day hold do not consume a shortlist slot
+unless the idea is explicitly classified as an event trade. Unknown earnings
+dates remain visibly unverified and cannot be staged. The pool is capped at two
+names per sector and correlated cluster.
+
+Each row contains a TradingView chart link, an OptionStrat custom-combination
+link, the exact price trigger/invalidation/target, earnings and Tier-1 macro
+warnings, and a 40–85 DTE defined-risk debit-spread plan compatible with a
+30-calendar-day maximum hold.  During 15:00–15:40 ET the monitor checks only the
+top five or ten TWS underlying quotes.  A valid crossing flashes the row, sounds
+an alert, and can raise a browser notification.  It refuses stale quotes,
+breached invalidations, entries more than 0.35 ATR beyond the trigger, earnings
+inside the hold or unverified earnings, illiquid option NBBOs, per-leg option
+open interest below 100, per-leg daily volume below 10, debit above 45% of spread width,
+an unspecified multi-account destination, and orders outside the risk or
+available-funds budget.  An existing position or working order in the selected
+account is flagged and blocked pending a separate portfolio review.
+
+The staging governor permits at most two new entries per session, 0.5% NLV
+structural risk per trade, 1% total new risk per session, and one new entry per
+correlated factor cluster. Same-day pre-release and next-day CPI/NFP/FOMC events
+block new entries; the post-release session and events two calendar days away
+halve the new-trade risk budget.
+
+The **Stage TWS** button rechecks the underlying trigger, exact option NBBO,
+earnings gate, account NLV/available funds and quantity on the server.  It runs
+a what-if margin check and creates a combo with `transmit=False`.  The radar
+never transmits an order; review the account, legs, limit and margin in TWS and
+transmit manually only if they are correct.
+
+Every static, reserve and challenger trigger is evaluated at 1/3/5/10/20
+trading-day horizons. The durable evidence table records direction-adjusted
+return, MFE, MAE, target/invalidation hits and false breakouts. A false breakout
+means the next trading-day close returned through the trigger, or invalidation
+was hit before target. This evidence determines whether five, ten or the
+challenger model should eventually be promoted.
+
+Price-Action supplies a separate, versioned US context feed after its scheduled
+scan. Radar validates its schema and timestamp, then records S1/S2 directional
+confirmation or conflict, S3 neutral research context and S4 experimental
+context beside each matching ticker. These annotations are **shadow only**:
+they do not change the primary score, rank, trigger, risk gate or staging
+permission. The integration fails open if the feed is missing, malformed or
+more than 96 hours old. Override the public feed URL with
+`FVS_PRICE_ACTION_FEED`; set it to `off` to disable the context layer.
+
+Run the desk and open it directly:
+
+```text
+radar.bat
+# or
+python webapp.py            # -> http://127.0.0.1:8765/stocks
+```
+
+While `webapp.py` is running, an internal New-York-time scheduler attempts the
+daily scan after 16:10 ET and the weekly scan on Friday.  For unattended Windows
+scheduling, run `install_radar_task.ps1` once in PowerShell.  It installs three
+Melbourne-morning checks to cover both markets' DST combinations; the
+`--due-only` New York guard makes the two irrelevant checks no-ops.  A manual or
+Task Scheduler run is also available:
+
+```text
+radar_after_close.bat
+python stock_radar_scan.py --cadence auto --source yf --due-only
+```
+
+Use `--source mock` and Last-hour source **Practice trigger** to exercise the
+entire scan/flash/stage-preview flow without TWS or a live order.
+
+### GitHub Codespaces practice test
+
+Create the Codespace from the radar branch.  Its dev-container installs the
+requirements and forwards port 8765 automatically.  In the terminal run:
+
+```text
+python webapp.py
+```
+
+Open the forwarded **Stock Opportunity Radar** port, select **Practice data**,
+**Practice trigger**, and **MOCK-A**, then run the after-close scan and start the
+monitor. Codespaces can test the active/reserve labels, frozen selection, risk
+gates, ranking, alerts, links and inert
+mock-stage flow.  It cannot connect to TWS running on another computer because
+Codespaces has its own isolated localhost.
+
+TWS defaults to `127.0.0.1:7496`.  Override it before starting the app when
+testing against paper TWS without editing source:
+
+```powershell
+$env:FVS_TWS_PORT = "7497"
+python webapp.py
+```
+
 ## Last Hour Trade Desk
 
 This branch opens `/` as a focused 15:00–15:40 ET decision surface. It hides

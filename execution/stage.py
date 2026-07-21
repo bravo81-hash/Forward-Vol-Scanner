@@ -5,7 +5,6 @@ TWS budget: N qualify calls + 1 whatIf + 1 placeOrder per staging.
 """
 from __future__ import annotations
 from core.chain import SURFACE_CFG
-from core.models import Suggestion
 
 
 def _round_tick(x: float, tick: float = 0.05) -> float:
@@ -18,12 +17,15 @@ def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
     if transmit:
         raise ValueError("automatic transmission is disabled; review and transmit manually in TWS")
     from ib_insync import ComboLeg, Contract, LimitOrder, Option
-    st, exch, tc, is_idx = SURFACE_CFG[symbol]
+    _st, _exch, tc, _is_idx = SURFACE_CFG.get(
+        symbol, ("STK", "SMART", symbol, False))
+    tc = next((leg.get("trading_class") for leg in sug_legs
+               if leg.get("trading_class")), tc)
     opts = []
-    for l in sug_legs:
-        o = Option(symbol, l["expiry"].replace("-", ""), l["strike"], l["cp"],
+    for leg in sug_legs:
+        o = Option(symbol, leg["expiry"].replace("-", ""), leg["strike"], leg["cp"],
                    "SMART", tradingClass=tc, currency="USD")
-        opts.append((l, o))
+        opts.append((leg, o))
     ib.qualifyContracts(*[o for _, o in opts])
     if any(not o.conId for _, o in opts):
         raise RuntimeError("leg qualification failed")
@@ -31,9 +33,9 @@ def stage_suggestion(ib, symbol: str, sug_legs: list[dict], net_mid: float,
     combo = Contract(symbol=symbol, secType="BAG", currency="USD",
                      exchange="SMART")
     combo.comboLegs = [
-        ComboLeg(conId=o.conId, ratio=abs(l["qty"]),
-                 action="BUY" if l["qty"] > 0 else "SELL", exchange="SMART")
-        for l, o in opts]
+        ComboLeg(conId=o.conId, ratio=abs(leg["qty"]),
+                 action="BUY" if leg["qty"] > 0 else "SELL", exchange="SMART")
+        for leg, o in opts]
 
     action = "BUY" if net_mid >= 0 else "SELL"
     px = _round_tick(abs(net_mid))

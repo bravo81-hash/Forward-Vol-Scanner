@@ -121,6 +121,35 @@ def upcoming_tier1(today: date, limit: int = 6) -> list[dict]:
     return rows[:limit]
 
 
+def macro_risk_gate(now: datetime | None = None) -> dict:
+    """Deterministic new-entry gate for CPI, NFP and FOMC risk.
+
+    Same-day pre-release and next-session events block. The post-release
+    session and events two calendar days away halve the new-risk budget.
+    PPI remains visible on the calendar but is not part of this strict gate.
+    """
+    now = (now or datetime.now(US_TZ)).astimezone(US_TZ)
+    events = [x for x in upcoming_tier1(now.date(), limit=12)
+              if x["kind"] in {"CPI", "NFP", "FOMC"}]
+    if not events:
+        return {"action": "CLEAR", "size_multiplier": 1.0, "event": None,
+                "reason": "No scheduled CPI, NFP or FOMC in the gate window."}
+    event = events[0]
+    event_at = datetime.fromisoformat(event["datetime_et"])
+    dte = int(event["dte"])
+    if dte == 0 and now < event_at:
+        action, mult, reason = "BLOCK", 0.0, f"{event['kind']} has not been released yet today."
+    elif dte == 1:
+        action, mult, reason = "BLOCK", 0.0, f"{event['kind']} is scheduled next calendar day."
+    elif dte == 0:
+        action, mult, reason = "SIZE_DOWN", 0.5, f"Post-{event['kind']} session: halve new risk."
+    elif dte == 2:
+        action, mult, reason = "SIZE_DOWN", 0.5, f"{event['kind']} is two calendar days away."
+    else:
+        action, mult, reason = "CLEAR", 1.0, f"Next strict-gate event is {event['kind']} in {dte} days."
+    return {"action": action, "size_multiplier": mult, "event": event, "reason": reason}
+
+
 def opex_day(y: int, m: int) -> date:
     first = date(y, m, 1)
     off = (4 - first.weekday()) % 7          # weekday(): Mon=0 .. Fri=4

@@ -10,6 +10,7 @@ TWS limits respected here:
 from __future__ import annotations
 import asyncio
 import math
+import os
 import threading
 import time
 
@@ -17,8 +18,8 @@ MAX_LINES = 40        # concurrent market-data lines per batch (default cap is ~
 PACE_S = 0.05         # gap between request submits (50 msg/s API ceiling)
 QUOTE_TIMEOUT = 8.0
 
-DEFAULT_HOST = "127.0.0.1"    # TWS on this machine
-DEFAULT_PORT = 7496           # 7497 = paper
+DEFAULT_HOST = os.getenv("FVS_TWS_HOST", "127.0.0.1")
+DEFAULT_PORT = int(os.getenv("FVS_TWS_PORT", "7496"))  # 7497 = paper
 _client_ids = iter(lambda: int(time.time() * 10) % 800 + 100, None)
 
 
@@ -96,7 +97,8 @@ def with_ib(fn, host=DEFAULT_HOST, port=DEFAULT_PORT):
     return _finish_result(out, th.is_alive(), TWS_JOB_TIMEOUT)
 
 
-def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT):
+def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT,
+               want_depth: bool = False):
     """Quote a list of qualified contracts in pacing-aware batches.
 
     Returns {conId: {bid, ask, mid, iv, oi, volume}}. Lines are cancelled
@@ -117,10 +119,14 @@ def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT
         while waited < timeout:
             ib.sleep(0.5)
             waited += 0.5
-            ready = all(
-                (val(t.bid) and val(t.ask)) and
-                (not want_greeks or (t.modelGreeks and t.modelGreeks.impliedVol))
-                for _, t in tickers)
+            ready = all((val(t.bid) and val(t.ask)) and
+                        (not want_greeks or (t.modelGreeks and t.modelGreeks.impliedVol)) and
+                        (not want_depth or
+                         ((val(getattr(t, "callOpenInterest", None)) or
+                           val(getattr(t, "putOpenInterest", None))) and
+                          (val(getattr(t, "callVolume", None)) or
+                           val(getattr(t, "putVolume", None)))))
+                        for _, t in tickers)
             if ready:
                 break
         for c, t in tickers:
@@ -131,12 +137,18 @@ def quote_many(ib, contracts, fields="", want_greeks=True, timeout=QUOTE_TIMEOUT
             greeks = ({"delta": mg.delta, "gamma": mg.gamma,
                        "theta": mg.theta, "vega": mg.vega}
                       if mg and mg.delta is not None else None)
-            res[c.conId] = {"bid": bid, "ask": ask, "mid": mid, "greeks": greeks,
+            last, close = val(getattr(t, "last", None)), val(getattr(t, "close", None))
+            right = str(getattr(c, "right", "") or "").upper()
+            oi = (getattr(t, "callOpenInterest", None) if right == "C" else
+                  getattr(t, "putOpenInterest", None) if right == "P" else
+                  getattr(t, "openInterest", None))
+            volume = (getattr(t, "callVolume", None) if right == "C" else
+                      getattr(t, "putVolume", None) if right == "P" else
+                      getattr(t, "volume", None))
+            res[c.conId] = {"bid": bid, "ask": ask, "mid": mid,
+                            "last": last, "close": close, "greeks": greeks,
                             "iv": iv if iv and 0.01 < iv < 3 else None,
-                            "oi": getattr(t, "openInterest", None) or
-                                  getattr(t, "putOpenInterest", None) or
-                                  getattr(t, "callOpenInterest", None),
-                            "volume": val(t.volume)}
+                            "oi": val(oi), "volume": val(volume)}
             ib.cancelMktData(c)
     return res
 

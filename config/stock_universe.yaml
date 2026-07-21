@@ -1,0 +1,78 @@
+# Curated liquid US single-stock options universe for Stock Opportunity Radar.
+# The user never has to feed symbols.  This list is deliberately finite so a
+# full after-close scan stays fast and the live last-hour monitor needs at most
+# ten underlying market-data lines.
+stocks:
+  - {symbol: AAPL, exchange: NASDAQ, sector: Technology, cluster: mega_tech}
+  - {symbol: MSFT, exchange: NASDAQ, sector: Technology, cluster: mega_tech}
+  - {symbol: NVDA, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: AMD, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: AVGO, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: MU, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: QCOM, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: AMAT, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: LRCX, exchange: NASDAQ, sector: Semiconductors, cluster: ai_chips}
+  - {symbol: ANET, exchange: NYSE, sector: Technology, cluster: ai_infrastructure}
+  - {symbol: ORCL, exchange: NYSE, sector: Technology, cluster: enterprise_software}
+  - {symbol: CRM, exchange: NYSE, sector: Technology, cluster: enterprise_software}
+  - {symbol: ADBE, exchange: NASDAQ, sector: Technology, cluster: enterprise_software}
+  - {symbol: NOW, exchange: NYSE, sector: Technology, cluster: enterprise_software}
+  - {symbol: PLTR, exchange: NASDAQ, sector: Technology, cluster: ai_software}
+  - {symbol: PANW, exchange: NASDAQ, sector: Technology, cluster: cyber}
+  - {symbol: CRWD, exchange: NASDAQ, sector: Technology, cluster: cyber}
+  - {symbol: GOOGL, exchange: NASDAQ, sector: Communication, cluster: mega_tech}
+  - {symbol: META, exchange: NASDAQ, sector: Communication, cluster: mega_tech}
+  - {symbol: NFLX, exchange: NASDAQ, sector: Communication, cluster: streaming}
+  - {symbol: DIS, exchange: NYSE, sector: Communication, cluster: media}
+  - {symbol: AMZN, exchange: NASDAQ, sector: Consumer Discretionary, cluster: mega_tech}
+  - {symbol: TSLA, exchange: NASDAQ, sector: Consumer Discretionary, cluster: ev}
+  - {symbol: HD, exchange: NYSE, sector: Consumer Discretionary, cluster: retail}
+  - {symbol: LOW, exchange: NYSE, sector: Consumer Discretionary, cluster: retail}
+  - {symbol: MCD, exchange: NYSE, sector: Consumer Discretionary, cluster: restaurants}
+  - {symbol: NKE, exchange: NYSE, sector: Consumer Discretionary, cluster: apparel}
+  - {symbol: SBUX, exchange: NASDAQ, sector: Consumer Discretionary, cluster: restaurants}
+  - {symbol: BKNG, exchange: NASDAQ, sector: Consumer Discretionary, cluster: travel}
+  - {symbol: ABNB, exchange: NASDAQ, sector: Consumer Discretionary, cluster: travel}
+  - {symbol: WMT, exchange: NASDAQ, sector: Consumer Staples, cluster: defensive_retail}
+  - {symbol: COST, exchange: NASDAQ, sector: Consumer Staples, cluster: defensive_retail}
+  - {symbol: PG, exchange: NYSE, sector: Consumer Staples, cluster: staples}
+  - {symbol: KO, exchange: NYSE, sector: Consumer Staples, cluster: beverages}
+  - {symbol: PEP, exchange: NASDAQ, sector: Consumer Staples, cluster: beverages}
+  - {symbol: PM, exchange: NYSE, sector: Consumer Staples, cluster: tobacco}
+  - {symbol: JPM, exchange: NYSE, sector: Financials, cluster: banks}
+  - {symbol: BAC, exchange: NYSE, sector: Financials, cluster: banks}
+  - {symbol: C, exchange: NYSE, sector: Financials, cluster: banks}
+  - {symbol: GS, exchange: NYSE, sector: Financials, cluster: capital_markets}
+  - {symbol: MS, exchange: NYSE, sector: Financials, cluster: capital_markets}
+  - {symbol: AXP, exchange: NYSE, sector: Financials, cluster: payments}
+  - {symbol: V, exchange: NYSE, sector: Financials, cluster: payments}
+  - {symbol: MA, exchange: NYSE, sector: Financials, cluster: payments}
+  - {symbol: SCHW, exchange: NYSE, sector: Financials, cluster: brokers}
+  - {symbol: UNH, exchange: NYSE, sector: Healthcare, cluster: managed_care}
+  - {symbol: LLY, exchange: NYSE, sector: Healthcare, cluster: pharma}
+  - {symbol: JNJ, exchange: NYSE, sector: Healthcare, cluster: pharma}
+  - {symbol: ABBV, exchange: NYSE, sector: Healthcare, cluster: pharma}
+  - {symbol: MRK, exchange: NYSE, sector: Healthcare, cluster: pharma}
+  - {symbol: PFE, exchange: NYSE, sector: Healthcare, cluster: pharma}
+  - {symbol: TMO, exchange: NYSE, sector: Healthcare, cluster: life_sciences}
+  - {symbol: ISRG, exchange: NASDAQ, sector: Healthcare, cluster: medtech}
+  - {symbol: GE, exchange: NYSE, sector: Industrials, cluster: aerospace}
+  - {symbol: BA, exchange: NYSE, sector: Industrials, cluster: aerospace}
+  - {symbol: CAT, exchange: NYSE, sector: Industrials, cluster: machinery}
+  - {symbol: DE, exchange: NYSE, sector: Industrials, cluster: machinery}
+  - {symbol: HON, exchange: NASDAQ, sector: Industrials, cluster: industrials}
+  - {symbol: UPS, exchange: NYSE, sector: Industrials, cluster: logistics}
+  - {symbol: FDX, exchange: NYSE, sector: Industrials, cluster: logistics}
+  - {symbol: LMT, exchange: NYSE, sector: Defense, cluster: defense}
+  - {symbol: RTX, exchange: NYSE, sector: Defense, cluster: defense}
+  - {symbol: NOC, exchange: NYSE, sector: Defense, cluster: defense}
+  - {symbol: XOM, exchange: NYSE, sector: Energy, cluster: integrated_oil}
+  - {symbol: CVX, exchange: NYSE, sector: Energy, cluster: integrated_oil}
+  - {symbol: COP, exchange: NYSE, sector: Energy, cluster: exploration}
+  - {symbol: SLB, exchange: NYSE, sector: Energy, cluster: oil_services}
+  - {symbol: OXY, exchange: NYSE, sector: Energy, cluster: exploration}
+  - {symbol: FCX, exchange: NYSE, sector: Materials, cluster: copper}
+  - {symbol: NEM, exchange: NYSE, sector: Materials, cluster: gold}
+  - {symbol: NEE, exchange: NYSE, sector: Utilities, cluster: utilities}
+  - {symbol: PLD, exchange: NYSE, sector: Real Estate, cluster: reit}
+  - {symbol: AMT, exchange: NYSE, sector: Real Estate, cluster: reit}
