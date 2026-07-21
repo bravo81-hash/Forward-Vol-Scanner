@@ -1,9 +1,4 @@
-"""Pure ranking and trigger logic for the single-stock Opportunity Radar.
-
-The full liquid universe is scanned after the close.  Only the saved top five
-(daily) or top ten (Friday/weekly) are touched by TWS during the last hour, so
-the live desk remains comfortably inside IBKR market-data and pacing limits.
-"""
+"""Pure ranking and trigger logic for the single-stock Opportunity Radar."""
 from __future__ import annotations
 
 import math
@@ -17,9 +12,10 @@ from core.models import Leg
 from core.pricing import risk_profile, struct_greeks, struct_value
 from execution.optionstrat import optionstrat_url
 
-POLICY_ID = "stock-radar-v1"
-DAILY_LIMIT = 5
-WEEKLY_LIMIT = 10
+POLICY_ID = "stock-radar-v2"
+ACTIVE_LIMIT = 5
+POOL_LIMIT = 10
+RESEARCH_LIMIT = 20
 MIN_BARS = 220
 MIN_PRICE = 15.0
 MIN_DOLLAR_VOLUME = 50_000_000.0
@@ -289,30 +285,28 @@ def apply_earnings(idea: dict, earnings_date: date | None, today: date) -> dict:
     idea["risk_flags"] = [x for x in idea["risk_flags"] if not x.startswith("Verify the next earnings")]
     if earnings_date is None:
         idea["earnings"] = {"status": "VERIFY", "date": None, "dte": None}
+        idea["event_lock"] = False
         idea["risk_flags"].append("Verify the next earnings date before staging.")
         return idea
     dte = (earnings_date - today).days
     if dte < 0:
         status = "POST_EVENT"
-    elif dte <= 7:
-        status = "LOCKED"
-    elif dte <= 35:
+    elif dte <= 30:
         status = "INSIDE_HOLD"
     else:
         status = "CLEAR"
     idea["earnings"] = {"status": status, "date": earnings_date.isoformat(), "dte": dte}
-    idea["event_lock"] = status == "LOCKED"
-    if status == "LOCKED":
-        idea["risk_flags"].append("Earnings inside seven days: wait for the post-event trigger reset.")
-    elif status == "INSIDE_HOLD":
-        idea["risk_flags"].append("Earnings falls inside the 30-day hold: mandatory pre-event exit unless explicitly event-sized.")
+    idea["event_lock"] = status in ("INSIDE_HOLD", "VERIFY") and not idea.get("event_trade", False)
+    if status == "INSIDE_HOLD":
+        idea["risk_flags"].append(
+            "Earnings is inside the 30-day hold: excluded unless explicitly classified as an event trade.")
     return idea
 
 
 def rank_ideas(ideas: list[dict], cadence: str, previous_symbols: set[str] | None = None,
-               limit: int | None = None) -> list[dict]:
-    cadence_cap = WEEKLY_LIMIT if cadence == "weekly" else DAILY_LIMIT
-    limit = min(max(int(limit or cadence_cap), 1), cadence_cap)
+               limit: int | None = None, *, research: bool = False) -> list[dict]:
+    limit = min(max(int(limit or POOL_LIMIT), 1),
+                RESEARCH_LIMIT if research else POOL_LIMIT)
     previous_symbols = previous_symbols or set()
     for idea in ideas:
         idea["raw_score"] = idea["score"]
@@ -338,7 +332,47 @@ def rank_ideas(ideas: list[dict], cadence: str, previous_symbols: set[str] | Non
             break
     for i, idea in enumerate(selected, 1):
         idea["rank"] = i
+        idea["list_role"] = "ACTIVE" if i <= ACTIVE_LIMIT else "RESERVE"
+        idea["cohort"] = "v1_static"
+        idea["shadow_only"] = False
     return selected
+
+
+def challenger_rank(ideas: list[dict], quotes: dict[str, dict], *,
+                    active_limit: int = ACTIVE_LIMIT, promotion_edge: float = 5.0) -> dict:
+    """Compare the static active five with the wider research pool.
+
+    The challenger only changes readiness using a current underlying quote. It
+    does not rebuild indicators intraday, which keeps API use small and avoids
+    look-ahead churn. Challenger promotions remain shadow-only until the model
+    is explicitly promoted after outcome review.
+    """
+    scored = []
+    for original in ideas:
+        idea = {**original}
+        q = quotes.get(idea["symbol"]) or {}
+        price = float(q.get("price") or idea["price"])
+        state = trigger_state(idea, price, fresh=bool(q.get("fresh", False)),
+                              in_last_hour=False)
+        # Being near a valid trigger is useful; an overrun, invalidation or
+        # unavailable quote must never manufacture a challenger promotion.
+        readiness = max(-8.0, 6.0 - max(state["distance_atr"], 0.0) * 8.0)
+        if state["state"] in ("INVALID", "EXTENDED", "STALE", "NO_DATA"):
+            readiness = -20.0
+        idea["challenger_score"] = round(float(idea["score"]) + readiness, 1)
+        idea["challenger_state"] = state["state"]
+        scored.append(idea)
+    baseline = sorted(scored, key=lambda x: x["rank"])[:active_limit]
+    floor = min((float(x["challenger_score"]) for x in baseline), default=0.0)
+    challengers = sorted((x for x in scored if int(x["rank"]) > active_limit),
+                         key=lambda x: x["challenger_score"], reverse=True)
+    qualifying = [x for x in challengers
+                  if x["challenger_score"] >= floor + promotion_edge
+                  and x["challenger_state"] not in ("INVALID", "EXTENDED", "STALE")]
+    shadow_promotions = qualifying[:2]
+    return {"baseline": baseline, "shadow_promotions": shadow_promotions,
+            "promotion_edge": promotion_edge, "active_floor": round(floor, 1),
+            "challengers": challengers}
 
 
 def trigger_state(idea: dict, live_price: float, *, fresh: bool,
@@ -386,6 +420,7 @@ def model_card(idea: dict, today: date, spot: float | None = None) -> dict:
     greeks = {k: round(v * 100, 2) for k, v in struct_greeks(spot, legs, today).items()}
     return {
         "strategy": "debit_spread", "label": idea["strategy"]["label"],
+        "score": float(idea.get("score") or 0),
         "legs_raw": raw, "legs": [x.key() for x in legs], "net_mid": entry,
         "mid_src": "model", "greeks": greeks, "risk_profile": profile,
         "max_profit": profile["max_profit"], "max_loss": profile["max_loss"],

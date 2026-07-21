@@ -23,16 +23,19 @@ from .pricing import MULT, q_for, struct_metrics
 GREEK_KEYS = ("delta", "gamma", "theta", "vega")
 WING_SPREAD_WARN = 0.15   # P7: NBBO (ask-bid)/mid on any leg above this -> flag
 LIQ_PENALTY = 0.5         # score deduction when flagged (per doctrine: never a block)
+MIN_OPTION_OI = 100
+MIN_OPTION_VOLUME = 10
 
 
-def assess_liquidity(legs_raw: list[dict], rows: dict) -> dict:
+def assess_liquidity(legs_raw: list[dict], rows: dict, *,
+                     enforce_depth: bool = False) -> dict:
     """P7 — pure, TWS-free: given a card's raw legs and their quote rows
     ({(expiry,strike,cp): {bid,ask,mid,...} or None}), report which legs have
     no two-sided quote and which have a wide NBBO spread. This runs the SAME
     check whether repricing succeeded or fell back to model — previously a
     missing quote silently kept model prices with no visible flag at all.
     """
-    no_quote, wide = [], []
+    no_quote, wide, low_oi, low_volume = [], [], [], []
     for leg in legs_raw:
         key = (leg["expiry"], leg["strike"], leg["cp"])
         r = rows.get(key)
@@ -43,12 +46,20 @@ def assess_liquidity(legs_raw: list[dict], rows: dict) -> dict:
         spr = (r["ask"] - r["bid"]) / r["mid"] if r["mid"] else 1.0
         if spr > WING_SPREAD_WARN:
             wide.append({"leg": tag, "spread_pct": round(spr * 100, 1)})
-    flagged = bool(no_quote or wide)
-    return {"flagged": flagged, "no_quote_legs": no_quote, "wide_legs": wide}
+        oi, volume = r.get("oi"), r.get("volume")
+        if oi is None or float(oi) < MIN_OPTION_OI:
+            low_oi.append({"leg": tag, "oi": oi})
+        if volume is None or float(volume) < MIN_OPTION_VOLUME:
+            low_volume.append({"leg": tag, "volume": volume})
+    flagged = bool(no_quote or wide or (enforce_depth and (low_oi or low_volume)))
+    return {"flagged": flagged, "no_quote_legs": no_quote, "wide_legs": wide,
+            "low_oi_legs": low_oi, "low_volume_legs": low_volume,
+            "minimum_oi": MIN_OPTION_OI, "minimum_volume": MIN_OPTION_VOLUME,
+            "depth_enforced": enforce_depth}
 
 
 def reprice_cards(ib, symbol: str, spot: float, today: date,
-                  cards: list[dict]) -> None:
+                  cards: list[dict], *, strict_option_liquidity: bool = False) -> None:
     from ib_insync import Option
     _st, _exch, tc, _idx = SURFACE_CFG.get(
         symbol, ("STK", "SMART", symbol, False))
@@ -59,11 +70,14 @@ def reprice_cards(ib, symbol: str, spot: float, today: date,
     opts = {k: Option(symbol, k[0].replace("-", ""), k[1], k[2], "SMART",
                       tradingClass=tc, currency="USD") for k in keys}
     ib.qualifyContracts(*opts.values())
-    quotes = quote_many(ib, [o for o in opts.values() if o.conId])
+    quotes = quote_many(ib, [o for o in opts.values() if o.conId],
+                        fields="100,101" if strict_option_liquidity else "",
+                        want_depth=strict_option_liquidity)
     rows = {k: quotes.get(o.conId) for k, o in opts.items() if o.conId}
 
     for c in cards:
-        liq = assess_liquidity(c["legs_raw"], rows)     # P7: always assessed
+        liq = assess_liquidity(c["legs_raw"], rows,
+                               enforce_depth=strict_option_liquidity)
         c["liquidity"] = liq
         if liq["flagged"]:
             if liq["no_quote_legs"]:
@@ -73,6 +87,12 @@ def reprice_cards(ib, symbol: str, spot: float, today: date,
             for w in liq["wide_legs"]:
                 c["rationale"].append(f"LIQUIDITY: {w['leg']} NBBO spread "
                                       f"{w['spread_pct']:.0f}% — wide wing, check fill cost")
+            if strict_option_liquidity and liq["low_oi_legs"]:
+                c["rationale"].append(
+                    f"LIQUIDITY: option OI below {MIN_OPTION_OI} or unavailable")
+            if strict_option_liquidity and liq["low_volume_legs"]:
+                c["rationale"].append(
+                    f"LIQUIDITY: option volume below {MIN_OPTION_VOLUME} or unavailable")
             c["score"] = round(c["score"] - LIQ_PENALTY, 2)
 
         legs = [(leg, rows.get((leg["expiry"], leg["strike"], leg["cp"])))

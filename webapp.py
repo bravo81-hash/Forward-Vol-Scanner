@@ -310,6 +310,15 @@ def api_stocks_stage():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.get("/api/stocks/evidence")
+def api_stocks_evidence():
+    from stock_radar import evidence
+    try:
+        return jsonify(evidence(refresh=request.args.get("refresh", "0") == "1"))
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.get("/api/last-hour/decision")
 def api_last_hour_decision():
     """Small live/practice desk: three flies plus TimeEdge and TimeZone only."""

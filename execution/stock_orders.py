@@ -74,7 +74,7 @@ def snap_vertical_live(ib, idea: dict, card: dict, spot: float,
         raise RuntimeError(f"{symbol}: one or more vertical legs are unavailable")
 
     live = {**card, "legs_raw": snapped, "rationale": list(card.get("rationale", []))}
-    reprice_cards(ib, symbol, spot, today, [live])
+    reprice_cards(ib, symbol, spot, today, [live], strict_option_liquidity=True)
     if live.get("mid_src") != "live":
         raise RuntimeError(f"{symbol}: exact legs do not have a two-sided live quote")
     if live.get("liquidity", {}).get("flagged"):
@@ -100,11 +100,16 @@ def snap_vertical_live(ib, idea: dict, card: dict, spot: float,
 
 
 def approve_lots(card: dict, nlv: float | None, risk_pct: float = 0.005,
-                 max_lots: int = 3, available_funds: float | None = None) -> dict:
+                 max_lots: int = 3, available_funds: float | None = None,
+                 daily_risk_used: float = 0.0,
+                 size_multiplier: float = 1.0) -> dict:
     nlv = float(nlv or 100_000)
     risk = max(abs(float(card.get("max_loss") or 0)) * 100,
                float(card.get("cash_required") or 0), 1.0)
-    budget = nlv * min(max(float(risk_pct), 0.001), 0.01)
+    per_trade_budget = nlv * min(max(float(risk_pct), 0.001), 0.005)
+    daily_remaining = max(nlv * 0.01 - max(float(daily_risk_used), 0.0), 0.0)
+    budget = min(per_trade_budget * max(min(float(size_multiplier), 1.0), 0.0),
+                 daily_remaining)
     cash_binding = False
     if available_funds is not None:
         available_funds = max(float(available_funds), 0.0)
@@ -119,28 +124,48 @@ def approve_lots(card: dict, nlv: float | None, risk_pct: float = 0.005,
     return {"approved_lots": lots, "risk_approved": lots > 0,
             "risk_per_lot": round(risk, 2), "risk_budget": round(budget, 2),
             "risk_pct_nlv": round(risk_pct * 100, 2),
+            "daily_risk_limit": round(nlv * .01, 2),
+            "daily_risk_used": round(float(daily_risk_used), 2),
+            "daily_risk_remaining": round(daily_remaining, 2),
+            "size_multiplier": round(float(size_multiplier), 2),
             "available_funds": available_funds, "binding": binding}
 
 
 def make_stageable(card: dict, idea: dict, nlv: float | None,
                    trigger: dict, available_funds: float | None = None,
-                   position_overlap: bool = False) -> dict:
+                   position_overlap: bool = False, *,
+                   session_usage: dict | None = None,
+                   macro_gate: dict | None = None) -> dict:
     card = dict(card)
-    gov = approve_lots(card, nlv, available_funds=available_funds)
+    usage = session_usage or {"count": 0, "risk_amount": 0.0, "clusters": []}
+    macro = macro_gate or {"action": "CLEAR", "size_multiplier": 1.0,
+                           "reason": "No macro gate."}
+    gov = approve_lots(card, nlv, available_funds=available_funds,
+                       daily_risk_used=float(usage.get("risk_amount") or 0),
+                       size_multiplier=float(macro.get("size_multiplier", 1.0)))
     event_status = idea.get("earnings", {}).get("status", "VERIFY")
     blocks = []
     if trigger.get("state") != "TRIGGERED":
         blocks.append("last-hour price trigger is not active")
-    if event_status in ("VERIFY", "LOCKED"):
-        blocks.append("earnings date is unverified or locked")
+    if event_status in ("VERIFY", "LOCKED", "INSIDE_HOLD") and not idea.get("event_trade"):
+        blocks.append("earnings is unverified or inside the intended 30-day hold")
     if available_funds is None:
         blocks.append("IBKR AvailableFunds is unavailable")
     if position_overlap:
         blocks.append("an existing position or working order needs portfolio review")
+    if int(usage.get("count") or 0) >= 2:
+        blocks.append("maximum two new entries already staged this session")
+    if idea.get("cluster") in set(usage.get("clusters") or []):
+        blocks.append("a new trade from this correlated factor cluster is already staged")
+    if macro.get("action") == "BLOCK":
+        blocks.append(macro.get("reason") or "imminent Tier-1 macro event")
+    if idea.get("shadow_only") or idea.get("cohort") == "challenger":
+        blocks.append("challenger is shadow-only until outcome evidence promotes the model")
     if not gov["risk_approved"]:
         blocks.append("risk budget approves zero spreads")
     card.update(governor=gov, blocks=blocks, permitted=not blocks,
                 tws_stage_allowed=not blocks, status="ENTER" if not blocks else "WAIT",
                 trigger=trigger, idea_id=idea.get("radar_candidate_id"),
-                policy_id="stock-radar-v1")
+                macro_gate=macro, session_usage=usage,
+                policy_id="stock-radar-v2")
     return card

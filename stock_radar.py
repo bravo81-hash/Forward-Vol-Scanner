@@ -4,18 +4,19 @@ from __future__ import annotations
 import os
 import threading
 import time as time_module
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from core.events import trading_clock, trading_today
+from core.events import macro_risk_gate, trading_clock, trading_today
 from core.ib_client import with_ib
 from core.reprice import reprice_cards
 from core.stock_data import quotes_tws, quotes_yf, scan_stocks
 from execution.candidates import validate_for_stage, within_execution_window
 from execution.stage import stage_suggestion
-from execution.stock_orders import approve_lots, make_stageable, snap_vertical_live
+from execution.stock_orders import make_stageable, snap_vertical_live
 from portfolio.accounts import list_accounts
-from selection.stock_radar import model_card, trigger_state
+from selection.stock_radar import (ACTIVE_LIMIT, POLICY_ID, challenger_rank,
+                                   model_card, trigger_state)
 from store.campaigns import campaign_store
 from store.radar import radar_store
 
@@ -26,7 +27,15 @@ def run_scan(cadence: str = "daily", source: str = "yf", limit: int | None = Non
     store = radar_store()
     payload = scan_stocks(cadence=cadence, source=source, limit=limit,
                           previous_symbols=store.previous_symbols(cadence))
-    return store.save(payload)
+    saved = store.save(payload)
+    if source == "yf":
+        try:
+            from core.stock_data import histories_yf
+            saved["outcome_update"] = store.update_outcomes(
+                histories_yf(store.shadow_symbols()))
+        except Exception as exc:  # evidence refresh must not invalidate a scan
+            saved["outcome_update"] = {"error": str(exc)}
+    return saved
 
 
 def latest_watchlist(cadence: str = "daily") -> dict:
@@ -34,6 +43,81 @@ def latest_watchlist(cadence: str = "daily") -> dict:
     if not out:
         raise ValueError(f"no saved {cadence} radar; run the after-close scan first")
     return out
+
+
+def _previous_weekday(day: date) -> date:
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def _expected_baseline_session(now: datetime | None = None) -> date:
+    now = (now or datetime.now(NY)).astimezone(NY)
+    if now.weekday() >= 5:
+        return _previous_weekday(now.date())
+    if now.time().replace(tzinfo=None) >= time(16, 10):
+        return now.date()
+    return _previous_weekday(now.date())
+
+
+def ensure_prepared(cadence: str, mode: str, now: datetime | None = None) -> tuple[dict, bool]:
+    """Catch up a missing/stale baseline when the operator starts late."""
+    watch = radar_store().latest(cadence)
+    if watch and watch.get("source") == "mock":
+        if mode != "mock":
+            raise ValueError("practice watchlists can only use practice monitoring; run a yfinance scan first")
+        return watch, False
+    if mode == "mock":
+        if not watch:
+            raise ValueError("no practice watchlist; run the Practice data scan first")
+        return watch, False
+    expected = _expected_baseline_session(now)
+    stale = not watch or watch.get("policy_id") != POLICY_ID
+    if watch:
+        try:
+            stale = date.fromisoformat(watch["session"]) < expected
+        except (KeyError, TypeError, ValueError):
+            stale = True
+    if stale:
+        return run_scan(cadence, "yf"), True
+    return watch, False
+
+
+def _live_selection(watch: dict, quotes: dict[str, dict], cadence: str,
+                    now: datetime | None = None) -> tuple[list[dict], dict]:
+    now = (now or datetime.now(NY)).astimezone(NY)
+    session = now.date().isoformat()
+    store = radar_store()
+    existing = store.live_session(session, cadence)
+    if existing and existing.get("frozen_at"):
+        return existing["candidates"], existing
+    research = watch.get("research_pool") or watch["candidates"]
+    comparison = challenger_rank(research, quotes)
+    baseline = [{**x, "list_role": "ACTIVE", "cohort": "v1_static",
+                 "shadow_only": False} for x in comparison["baseline"]]
+    refresh_due = now.weekday() < 5 and now.time().replace(tzinfo=None) >= time(14, 45)
+    shadow = []
+    if refresh_due:
+        shadow = [{**x, "list_role": "CHALLENGER", "cohort": "challenger",
+                   "shadow_only": True} for x in comparison["shadow_promotions"]]
+        store.record_shadow_candidates(watch["snapshot_id"], watch["session"],
+                                       "challenger", shadow)
+    shadow_symbols = {x["symbol"] for x in shadow}
+    reserves = [{**x, "list_role": "RESERVE", "cohort": "v1_reserve",
+                 "shadow_only": False}
+                for x in watch["candidates"][ACTIVE_LIMIT:]
+                if x["symbol"] not in shadow_symbols]
+    reserves = reserves[:max(0, 5 - len(shadow))]
+    payload = {"candidates": baseline + reserves + shadow,
+               "phase": "FROZEN" if refresh_due else "PREPARED",
+               "challenger_checked": refresh_due,
+               "challenger_count": len(shadow),
+               "promotion_edge": comparison["promotion_edge"],
+               "active_floor": comparison["active_floor"]}
+    saved = store.save_live_session(session, cadence, watch["snapshot_id"],
+                                    payload, frozen=refresh_due)
+    return saved["candidates"], saved
 
 
 def due_cadences(now: datetime | None = None, source: str | None = None) -> list[str]:
@@ -99,14 +183,16 @@ def _persist_card(idea: dict, card: dict, account: str | None, mode: str,
                "idea": idea, "trigger": trigger,
                "test_session_id": f"STOCK-{clock['ny_date']}-{idea['symbol']}"}
     return campaign_store().save_candidate(idea["symbol"], account, mode,
-                                           "stock-radar-v1", context, card,
+                                           POLICY_ID, context, card,
                                            ttl_seconds=300 if mode == "live" else 86400)
 
 
 def _monitor_rows(ideas: list[dict], quotes: dict[str, dict], *, mode: str,
                   in_window: bool, ib=None, account: str | None = None,
                   nlv: float = 100_000, available_funds: float | None = None,
-                  account_symbols: set[str] | None = None) -> list[dict]:
+                  account_symbols: set[str] | None = None,
+                  session_usage: dict | None = None,
+                  macro_gate: dict | None = None) -> list[dict]:
     rows = []
     today = trading_today()
     for idea in ideas:
@@ -129,7 +215,9 @@ def _monitor_rows(ideas: list[dict], quotes: dict[str, dict], *, mode: str,
         if state["state"] == "TRIGGERED" and mode == "live" and ib is not None:
             try:
                 card = snap_vertical_live(ib, idea, card, float(q["price"]), today)
-                card = make_stageable(card, idea, nlv, state, available_funds, overlap)
+                card = make_stageable(card, idea, nlv, state, available_funds, overlap,
+                                      session_usage=session_usage,
+                                      macro_gate=macro_gate)
                 if card["permitted"]:
                     card["candidate_id"] = _persist_card(
                         idea, card, account, mode, float(q["price"]), nlv, state)
@@ -138,12 +226,11 @@ def _monitor_rows(ideas: list[dict], quotes: dict[str, dict], *, mode: str,
                 card.update(permitted=False, tws_stage_allowed=False, status="WAIT",
                             blocks=[error])
         elif state["state"] == "TRIGGERED" and mode == "mock":
-            card.update(permitted=True, tws_stage_allowed=True, status="ENTER",
-                        governor={"approved_lots": 1, "risk_approved": True,
-                                  "risk_per_lot": card["cash_required"],
-                                  "risk_budget": nlv * .005})
-            card["candidate_id"] = _persist_card(
-                idea, card, account or "MOCK-A", mode, float(q["price"]), nlv, state)
+            card = make_stageable(card, idea, nlv, state, available_funds, overlap,
+                                  session_usage=session_usage, macro_gate=macro_gate)
+            if card["permitted"]:
+                card["candidate_id"] = _persist_card(
+                    idea, card, account or "MOCK-A", mode, float(q["price"]), nlv, state)
         rows.append({**visible_idea, "quote": q, "monitor": state, "trade_card": card,
                      "construction_error": error})
     return rows
@@ -151,32 +238,36 @@ def _monitor_rows(ideas: list[dict], quotes: dict[str, dict], *, mode: str,
 
 def monitor(cadence: str = "daily", mode: str = "auto", account: str | None = None,
             nlv: float | None = None) -> dict:
-    watch = latest_watchlist(cadence)
-    if watch.get("source") == "mock" and mode != "mock":
-        raise ValueError("practice watchlists can only use practice monitoring; run a yfinance scan first")
+    watch, caught_up = ensure_prepared(cadence, mode)
     try:
         session_age = (trading_today() - date.fromisoformat(watch["session"])).days
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("saved watchlist has an invalid market session; rescan") from exc
-    max_age = 8 if cadence == "weekly" else 4
+    max_age = 4
     if session_age < 0 or session_age > max_age:
         raise ValueError(f"saved {cadence} watchlist is stale ({session_age} calendar days); rescan")
-    ideas = watch["candidates"]
-    symbols = [x["symbol"] for x in ideas]
+    base_ideas = watch["candidates"]
+    research = watch.get("research_pool") or base_ideas
+    symbols = [x["symbol"] for x in research]
     errors = []
     actual_mode = mode
+    gate = macro_risk_gate()
+    selection_meta = None
     if mode in ("live", "auto"):
         try:
             def live_job(ib):
                 profile = _account_profile(ib, account, nlv)
                 q = quotes_tws(ib, symbols)
+                ideas, live_selection = _live_selection(watch, q, cadence)
                 account_symbols = _account_symbols(ib, profile["account"])
-                return profile, _monitor_rows(
+                usage = radar_store().entry_usage(profile["account"], trading_today().isoformat())
+                return profile, live_selection, _monitor_rows(
                     ideas, q, mode="live", in_window=within_execution_window(),
                     ib=ib, account=profile["account"], nlv=profile["nlv"],
                     available_funds=profile.get("available_funds"),
-                    account_symbols=account_symbols)
-            profile, rows = with_ib(live_job)
+                    account_symbols=account_symbols, session_usage=usage,
+                    macro_gate=gate)
+            profile, selection_meta, rows = with_ib(live_job)
             account, nlv = profile["account"], profile["nlv"]
             available_funds, cash = profile.get("available_funds"), profile.get("cash")
             actual_mode = "live"
@@ -186,30 +277,41 @@ def monitor(cadence: str = "daily", mode: str = "auto", account: str | None = No
                 raise RuntimeError(errors[-1]) from exc
     if actual_mode not in ("live",) or (mode == "auto" and errors):
         if mode == "mock":
+            mock_seed = {x["symbol"]: {"price": x["price"], "fresh": True}
+                         for x in research}
+            ideas, selection_meta = _live_selection(watch, mock_seed, cadence)
             quotes = {}
             for i, idea in enumerate(ideas):
                 trigger = float(idea["trigger"]["price"])
                 px = trigger * (1.001 if idea["direction"] == "BULL" else .999) if i == 0 else idea["price"]
                 quotes[idea["symbol"]] = {"price": px, "fresh": True,
                                            "source": "mock live", "captured_at": datetime.now(NY).isoformat()}
+            usage = radar_store().entry_usage(account or "MOCK-A", trading_today().isoformat())
             rows = _monitor_rows(ideas, quotes, mode="mock", in_window=True,
                                  account=account or "MOCK-A", nlv=float(nlv or 100_000),
-                                 available_funds=float(nlv or 100_000))
+                                 available_funds=float(nlv or 100_000),
+                                 session_usage=usage, macro_gate=gate)
             actual_mode = "mock"
             available_funds, cash = float(nlv or 100_000), float(nlv or 100_000)
         else:
+            ideas = base_ideas[:ACTIVE_LIMIT]
             quotes = quotes_yf(symbols)
             rows = _monitor_rows(ideas, quotes, mode="yf", in_window=False,
-                                 account=account, nlv=float(nlv or 100_000))
+                                 account=account, nlv=float(nlv or 100_000),
+                                 macro_gate=gate)
             actual_mode = "yf"
             available_funds, cash = None, None
     clock = trading_clock()
-    return {"policy_id": "stock-radar-v1", "mode": actual_mode,
+    return {"policy_id": POLICY_ID, "mode": actual_mode,
             "cadence": cadence, "snapshot_id": watch["snapshot_id"],
             "session": watch["session"], "account": account, "nlv": nlv,
             "available_funds": available_funds, "cash": cash,
             "clock": clock, "standard_window": within_execution_window(),
             "upcoming_tier1": watch.get("upcoming_tier1", []),
+            "macro_gate": gate, "caught_up": caught_up,
+            "selection": selection_meta or {"phase": "BASELINE", "challenger_checked": False},
+            "entry_usage": radar_store().entry_usage(account or "MOCK-A", clock["ny_date"]),
+            "evidence": radar_store().evidence_summary(),
             "fallback_chain": errors, "candidates": rows,
             "triggered": sum(x["monitor"]["state"] == "TRIGGERED" for x in rows),
             "armed": sum(x["monitor"]["state"] == "ARMED" for x in rows),
@@ -219,13 +321,19 @@ def monitor(cadence: str = "daily", mode: str = "auto", account: str | None = No
 def stage(candidate_id: str, quantity: int = 1) -> dict:
     checked = validate_for_stage(candidate_id, quantity)
     cand, stored, qty = checked["candidate"], checked["card"], checked["quantity"]
-    if cand["policy_id"] != "stock-radar-v1":
+    if cand["policy_id"] != POLICY_ID:
         raise ValueError("candidate is not a Stock Opportunity Radar order")
     if cand["mode"] == "mock":
         result = {"orderId": -1, "status": "MockStaged", "transmit": False,
                   "candidate_id": candidate_id, "qty": qty, "legs": stored["legs_raw"],
                   "warnings": checked["warnings"]}
         campaign_store().record_order(candidate_id, qty, result)
+        idea = cand["context"]["idea"]
+        risk = float(stored.get("governor", {}).get("risk_per_lot") or
+                     stored.get("cash_required") or 0) * qty
+        radar_store().record_entry(candidate_id, cand["account"] or "MOCK-A",
+                                   cand["context"]["session"], cand["symbol"],
+                                   idea.get("cluster", cand["symbol"]), risk, qty, result)
         return result
     if cand.get("context", {}).get("idea", {}).get("data_source") != "yf":
         raise ValueError("only a yfinance after-close watchlist can stage a live stock order")
@@ -237,6 +345,8 @@ def stage(candidate_id: str, quantity: int = 1) -> dict:
             raise ValueError("IBKR AvailableFunds is unavailable; order not staged")
         if cand["symbol"] in _account_symbols(ib, cand["account"]):
             raise ValueError("existing position or working order requires portfolio review")
+        usage = radar_store().entry_usage(cand["account"], trading_today().isoformat())
+        gate = macro_risk_gate()
         quote = quotes_tws(ib, [cand["symbol"]]).get(cand["symbol"])
         if not quote:
             raise RuntimeError("fresh underlying quote unavailable")
@@ -246,25 +356,48 @@ def stage(candidate_id: str, quantity: int = 1) -> dict:
             raise ValueError("trigger no longer active inside 15:00–15:40 ET; order not staged")
         live = {**stored, "rationale": list(stored.get("rationale", [])),
                 "legs_raw": [dict(x) for x in stored["legs_raw"]]}
-        reprice_cards(ib, cand["symbol"], quote["price"], trading_today(), [live])
+        reprice_cards(ib, cand["symbol"], quote["price"], trading_today(), [live],
+                      strict_option_liquidity=True)
         if live.get("mid_src") != "live" or live.get("liquidity", {}).get("flagged"):
             raise RuntimeError("exact option legs failed the refreshed NBBO liquidity check")
         width = abs(float(live["legs_raw"][1]["strike"]) - float(live["legs_raw"][0]["strike"]))
         if live["net_mid"] <= 0 or live["net_mid"] > width * .45:
             raise ValueError("refreshed debit no longer satisfies the 45%-of-width entry rule")
         sizing_nlv = min(float(ctx.get("nlv") or profile["nlv"]), profile["nlv"])
-        gov = approve_lots(live, sizing_nlv,
-                           available_funds=profile.get("available_funds"))
+        checked_card = make_stageable(
+            live, idea, sizing_nlv, trig, profile.get("available_funds"), False,
+            session_usage=usage, macro_gate=gate)
+        if not checked_card["permitted"]:
+            raise ValueError("; ".join(checked_card["blocks"]))
+        gov = checked_card["governor"]
         if qty > gov["approved_lots"]:
             raise ValueError(f"fresh risk budget approves {gov['approved_lots']} lots, requested {qty}")
-        return stage_suggestion(ib, cand["symbol"], live["legs_raw"], live["net_mid"],
-                                qty, transmit=False, account=cand["account"])
+        result = stage_suggestion(ib, cand["symbol"], live["legs_raw"], live["net_mid"],
+                                  qty, transmit=False, account=cand["account"])
+        result["radar_risk_amount"] = float(gov["risk_per_lot"]) * qty
+        result["radar_cluster"] = idea.get("cluster", cand["symbol"])
+        return result
 
     result = with_ib(live_job)
     result = {**result, "candidate_id": candidate_id, "transmit": False,
               "warnings": checked["warnings"]}
     campaign_store().record_order(candidate_id, qty, result)
+    radar_store().record_entry(candidate_id, cand["account"], cand["context"]["session"],
+                               cand["symbol"], result["radar_cluster"],
+                               result["radar_risk_amount"], qty, result)
     return result
+
+
+def evidence(refresh: bool = False) -> dict:
+    store = radar_store()
+    update = None
+    if refresh and store.shadow_symbols():
+        from core.stock_data import histories_yf
+        update = store.update_outcomes(histories_yf(store.shadow_symbols()))
+    return {"policy_id": POLICY_ID, "update": update,
+            "summary": store.evidence_summary(),
+            "false_breakout_definition":
+                "Next trading-day close back through the trigger, or invalidation hit before target."}
 
 
 class RadarScheduler:

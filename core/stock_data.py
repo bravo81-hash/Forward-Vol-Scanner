@@ -7,8 +7,9 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from core.events import trading_today, upcoming_tier1
-from selection.stock_radar import (analyse_symbol, apply_earnings, load_universe,
-                                   rank_ideas)
+from selection.stock_radar import (ACTIVE_LIMIT, POOL_LIMIT, RESEARCH_LIMIT,
+                                   POLICY_ID, analyse_symbol, apply_earnings,
+                                   load_universe, rank_ideas)
 
 NY = ZoneInfo("America/New_York")
 
@@ -39,7 +40,8 @@ def _frame_bars(frame) -> list[dict]:
     return out
 
 
-def histories_yf(symbols: list[str], period: str = "2y") -> dict[str, list[dict]]:
+def histories_yf(symbols: list[str], period: str = "2y", *,
+                 completed_only: bool = True) -> dict[str, list[dict]]:
     try:
         import yfinance as yf
     except ImportError as exc:
@@ -55,6 +57,14 @@ def histories_yf(symbols: list[str], period: str = "2y") -> dict[str, list[dict]
         except (KeyError, TypeError):
             continue
         bars = _frame_bars(frame)
+        if completed_only and bars:
+            now = datetime.now(NY)
+            # Before the scheduled 16:10 ET close scan, Yahoo can expose an
+            # incomplete current daily candle. Startup catch-up must always
+            # use the previous completed session as its technical baseline.
+            if (bars[-1]["date"] == now.date().isoformat()
+                    and now.time().replace(tzinfo=None) < datetime.strptime("16:10", "%H:%M").time()):
+                bars = bars[:-1]
         if bars:
             result[symbol] = bars
     return result
@@ -160,7 +170,7 @@ def scan_stocks(*, cadence: str = "daily", source: str = "yf",
     # names for calendars would be slow and unnecessary.
     pre = sorted(ideas, key=lambda x: x["score"], reverse=True)[:30]
     if source == "mock":
-        events = {x["symbol"]: today + timedelta(days=20 + i * 3)
+        events = {x["symbol"]: today + timedelta(days=45 + i * 3)
                   for i, x in enumerate(pre)}
         if pre:
             events[pre[0]["symbol"]] = today + timedelta(days=3)
@@ -174,20 +184,30 @@ def scan_stocks(*, cadence: str = "daily", source: str = "yf",
                 except Exception:  # pragma: no cover — defensive boundary
                     events[jobs[job]] = None
     enriched = [apply_earnings(x, events.get(x["symbol"]), today) for x in pre]
-    ranked = rank_ideas(enriched, cadence, previous_symbols, limit)
+    ranked_all = rank_ideas(enriched, cadence, previous_symbols,
+                            RESEARCH_LIMIT, research=True)
+    display_limit = min(max(int(limit or POOL_LIMIT), ACTIVE_LIMIT), POOL_LIMIT)
+    ranked = []
+    for i, idea in enumerate(ranked_all[:display_limit], 1):
+        ranked.append({**idea, "rank": i,
+                       "list_role": "ACTIVE" if i <= ACTIVE_LIMIT else "RESERVE"})
+    research_pool = [{**idea, "shadow_only": int(idea["rank"]) > POOL_LIMIT}
+                     for idea in ranked_all]
     return {
-        "policy_id": "stock-radar-v1", "cadence": cadence, "source": source,
+        "policy_id": POLICY_ID, "cadence": cadence, "source": source,
         "session": max((x["session"] for x in ranked), default=today.isoformat()),
         "created_at": datetime.now(NY).isoformat(), "universe_size": len(universe),
         "bars_available": len(histories) - 1, "setups_found": len(ideas),
-        "limit": len(ranked), "candidates": ranked,
+        "active_limit": min(ACTIVE_LIMIT, len(ranked)), "pool_limit": len(ranked),
+        "research_limit": len(research_pool), "limit": len(ranked),
+        "candidates": ranked, "research_pool": research_pool,
         "upcoming_tier1": upcoming_tier1(today),
         "criteria": {
             "hard_filters": ["price >= $15", "20-day dollar volume >= $50m",
                              ">=220 daily bars", "ATR/price <=8%", "listed in liquid options universe"],
             "score_weights": ["trend and structure", "trigger proximity", "relative strength",
                               "liquidity", "momentum/volume", "defined-risk payoff", "event hygiene"],
-            "diversification": "maximum two names per sector and per correlated cluster",
+            "diversification": "maximum two names per sector and per correlated cluster in the idea pool",
         },
     }
 

@@ -2,12 +2,18 @@
 
 ## Stock Opportunity Radar
 
-Open `/stocks` for an automatic single-stock options watchlist.  It scans the
+Open `/stocks` for an automatic single-stock options watchlist. It scans the
 curated liquid-options universe in `config/stock_universe.yaml` after each US
-session, saves no more than five names, and also saves a broader top ten after
-Friday's close.  The browser needs only those saved names during the last hour,
-which keeps TWS market-data use small and makes the list stable enough to review
-before a trigger fires.
+session. V2 displays five active names plus up to five reserves and retains the
+top 20 internally for research. Friday's pool is also saved, but its technical
+levels are refreshed from the latest completed session before it can be used.
+
+Startup is adaptive. If the computer was off after the prior close, the first
+monitor request builds the missing previous-close baseline automatically. At
+14:45 ET, or immediately when the app starts later, it compares the wider pool
+with the active five and then freezes the session list. Up to two materially
+better challengers can alert in **shadow mode**; they cannot stage live orders
+until their logged out-of-sample evidence is explicitly promoted.
 
 The scanner first requires at least 220 daily bars, price of at least $15,
 20-session average dollar volume of at least $50m, ATR/price no greater than 8%,
@@ -27,8 +33,9 @@ and failed rally.  Candidates then receive a transparent 100-point score:
 
 Friday ranking can add or subtract up to five points for 60-day relative
 strength.  A two-point carry-over bonus reduces unnecessary daily churn.
-Imminent-earnings names do not consume a shortlist slot; unknown earnings dates
-remain visibly unverified and cannot be staged.  The final list is capped at two
+Known earnings inside the intended 30-day hold do not consume a shortlist slot
+unless the idea is explicitly classified as an event trade. Unknown earnings
+dates remain visibly unverified and cannot be staged. The pool is capped at two
 names per sector and correlated cluster.
 
 Each row contains a TradingView chart link, an OptionStrat custom-combination
@@ -37,17 +44,31 @@ warnings, and a 40–85 DTE defined-risk debit-spread plan compatible with a
 30-calendar-day maximum hold.  During 15:00–15:40 ET the monitor checks only the
 top five or ten TWS underlying quotes.  A valid crossing flashes the row, sounds
 an alert, and can raise a browser notification.  It refuses stale quotes,
-breached invalidations, entries more than 0.35 ATR beyond the trigger, imminent
-or unverified earnings, illiquid option NBBOs, debit above 45% of spread width,
+breached invalidations, entries more than 0.35 ATR beyond the trigger, earnings
+inside the hold or unverified earnings, illiquid option NBBOs, per-leg option
+open interest below 100, per-leg daily volume below 10, debit above 45% of spread width,
 an unspecified multi-account destination, and orders outside the risk or
 available-funds budget.  An existing position or working order in the selected
 account is flagged and blocked pending a separate portfolio review.
+
+The staging governor permits at most two new entries per session, 0.5% NLV
+structural risk per trade, 1% total new risk per session, and one new entry per
+correlated factor cluster. Same-day pre-release and next-day CPI/NFP/FOMC events
+block new entries; the post-release session and events two calendar days away
+halve the new-trade risk budget.
 
 The **Stage TWS** button rechecks the underlying trigger, exact option NBBO,
 earnings gate, account NLV/available funds and quantity on the server.  It runs
 a what-if margin check and creates a combo with `transmit=False`.  The radar
 never transmits an order; review the account, legs, limit and margin in TWS and
 transmit manually only if they are correct.
+
+Every static, reserve and challenger trigger is evaluated at 1/3/5/10/20
+trading-day horizons. The durable evidence table records direction-adjusted
+return, MFE, MAE, target/invalidation hits and false breakouts. A false breakout
+means the next trading-day close returned through the trigger, or invalidation
+was hit before target. This evidence determines whether five, ten or the
+challenger model should eventually be promoted.
 
 Run the desk and open it directly:
 
@@ -83,7 +104,8 @@ python webapp.py
 
 Open the forwarded **Stock Opportunity Radar** port, select **Practice data**,
 **Practice trigger**, and **MOCK-A**, then run the after-close scan and start the
-monitor.  Codespaces can test the complete UI, ranking, alerts, links and inert
+monitor. Codespaces can test the active/reserve labels, frozen selection, risk
+gates, ranking, alerts, links and inert
 mock-stage flow.  It cannot connect to TWS running on another computer because
 Codespaces has its own isolated localhost.
 

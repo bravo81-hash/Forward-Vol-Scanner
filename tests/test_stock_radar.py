@@ -1,5 +1,5 @@
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -7,16 +7,23 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core.events import macro_risk_gate
+from core.reprice import assess_liquidity
 from core.stock_data import scan_stocks
 from execution.stock_orders import approve_lots, make_stageable
-from selection.stock_radar import monthly_expiry_near, rank_ideas, trigger_state
-from stock_radar import _account_profile, due_cadences
+from selection.stock_radar import (apply_earnings, monthly_expiry_near,
+                                   rank_ideas, trigger_state)
+from stock_radar import _account_profile, _live_selection, due_cadences
+from store.radar import RadarStore
 
 
-def test_mock_scan_returns_only_top_five_and_exact_trade_tools():
+def test_mock_scan_returns_active_five_and_up_to_five_reserves():
     out = scan_stocks(cadence="daily", source="mock", limit=10,
                       today=date(2026, 7, 20))
-    assert 1 <= len(out["candidates"]) <= 5
+    assert 5 <= len(out["candidates"]) <= 10
+    assert all(x["list_role"] == "ACTIVE" for x in out["candidates"][:5])
+    assert all(x["list_role"] == "RESERVE" for x in out["candidates"][5:])
+    assert len(out["research_pool"]) >= len(out["candidates"])
     for idea in out["candidates"]:
         assert idea["session"] == "2026-07-20"
         assert idea["score"] <= 100
@@ -105,6 +112,92 @@ def test_existing_position_blocks_radar_staging():
     assert any("existing position" in x for x in checked["blocks"])
 
 
+def test_earnings_inside_hold_is_excluded_unless_event_trade():
+    idea = {"risk_flags": [], "event_lock": False}
+    locked = apply_earnings(idea, date(2026, 8, 10), date(2026, 7, 20))
+    assert locked["earnings"]["status"] == "INSIDE_HOLD"
+    assert locked["event_lock"] is True
+    event = apply_earnings({**idea, "event_trade": True},
+                           date(2026, 8, 10), date(2026, 7, 20))
+    assert event["event_lock"] is False
+
+
+def test_macro_gate_blocks_before_fomc_and_halves_post_release():
+    ny = ZoneInfo("America/New_York")
+    before = macro_risk_gate(datetime(2026, 7, 29, 13, 30, tzinfo=ny))
+    after = macro_risk_gate(datetime(2026, 7, 29, 15, 0, tzinfo=ny))
+    assert before["action"] == "BLOCK" and before["size_multiplier"] == 0
+    assert after["action"] == "SIZE_DOWN" and after["size_multiplier"] == .5
+
+
+def test_strict_option_liquidity_requires_oi_volume_and_nbbo():
+    legs = [{"expiry": "2026-09-18", "strike": 100.0, "cp": "C"}]
+    key = ("2026-09-18", 100.0, "C")
+    low = assess_liquidity(legs, {key: {"bid": 2, "ask": 2.1, "mid": 2.05,
+                                                "oi": 99, "volume": 9}},
+                           enforce_depth=True)
+    assert low["flagged"] and low["low_oi_legs"] and low["low_volume_legs"]
+    good = assess_liquidity(legs, {key: {"bid": 2, "ask": 2.1, "mid": 2.05,
+                                                 "oi": 100, "volume": 10}},
+                            enforce_depth=True)
+    assert good["flagged"] is False
+
+
+def test_daily_and_cluster_risk_gates_block_new_stage():
+    card = {"max_loss": -2, "cash_required": 200}
+    idea = {"earnings": {"status": "CLEAR"}, "cluster": "mega_cap_tech"}
+    trigger = {"state": "TRIGGERED"}
+    usage = {"count": 1, "risk_amount": 200, "clusters": ["mega_cap_tech"]}
+    checked = make_stageable(card, idea, 100_000, trigger, 10_000,
+                             session_usage=usage)
+    assert checked["permitted"] is False
+    assert any("correlated factor cluster" in x for x in checked["blocks"])
+    full = make_stageable(card, {**idea, "cluster": "retail"}, 100_000,
+                          trigger, 10_000,
+                          session_usage={"count": 2, "risk_amount": 1000,
+                                         "clusters": []})
+    assert full["governor"]["approved_lots"] == 0
+    assert any("maximum two" in x for x in full["blocks"])
+
+
+def test_challenger_is_visible_but_shadow_only(monkeypatch, tmp_path):
+    monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "challenger.sqlite"))
+    import store.radar as radar_module
+    radar_module._STORE = None
+    watch = scan_stocks(cadence="daily", source="mock", today=date(2026, 7, 20))
+    saved = radar_module.radar_store().save(watch)
+    quotes = {x["symbol"]: {"price": x["price"], "fresh": True}
+              for x in saved["research_pool"]}
+    # Force a reserve close to its trigger and depress the active floor.
+    if len(saved["research_pool"]) > 5:
+        reserve = saved["research_pool"][5]
+        quotes[reserve["symbol"]]["price"] = reserve["trigger"]["price"]
+        saved["research_pool"][4]["score"] = 50
+    ny = ZoneInfo("America/New_York")
+    rows, meta = _live_selection(saved, quotes, "daily",
+                                 datetime(2026, 7, 21, 15, 5, tzinfo=ny))
+    assert meta["phase"] == "FROZEN" and len(rows) <= 10
+    assert all(x["shadow_only"] for x in rows if x["list_role"] == "CHALLENGER")
+
+
+def test_shadow_outcomes_log_all_requested_horizons(tmp_path):
+    store = RadarStore(tmp_path / "outcomes.sqlite")
+    idea = {"symbol": "TEST", "rank": 1, "direction": "BULL",
+            "trigger": {"price": 100}, "invalidation": 95, "target": 110}
+    store.record_shadow_candidates("RAD-X", "2026-01-02", "v1_static", [idea])
+    bars = []
+    start = date(2026, 1, 3)
+    for i in range(22):
+        close = 101 + i * .25
+        bars.append({"date": (start + timedelta(days=i)).isoformat(),
+                     "open": close, "high": close + 1, "low": close - 1,
+                     "close": close, "volume": 1})
+    update = store.update_outcomes({"TEST": bars})
+    assert update["outcomes_updated"] == 5
+    summary = store.evidence_summary()
+    assert [x["horizon_days"] for x in summary] == [1, 3, 5, 10, 20]
+
+
 def test_stock_radar_endpoints_mock(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "radar.sqlite"))
     import store.radar as radar_module
@@ -118,7 +211,7 @@ def test_stock_radar_endpoints_mock(monkeypatch, tmp_path):
     assert scan.status_code == 200
     payload = scan.get_json()
     assert payload["snapshot_id"].startswith("RAD-")
-    assert len(payload["candidates"]) <= 5
+    assert len(payload["candidates"]) <= 10
 
     latest = client.get("/api/stocks/latest?cadence=daily").get_json()
     assert latest["snapshot_id"] == payload["snapshot_id"]
