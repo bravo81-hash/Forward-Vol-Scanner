@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, timedelta
+from copy import deepcopy
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -151,12 +152,7 @@ def run_pattern_scan(*, source: str = "yf", tickers: list[str] | None = None,
     live_health = None
     live_excluded = 0
     if live and rows:
-        from core.ib_client import with_ib
-        from core.stock_data import quotes_tws
-        quotes = with_ib(lambda ib: quotes_tws(ib, [row["ticker"] for row in rows]))
-        rows, live_health = add_live_patterns(rows, quotes)
-        live_excluded = sum(row.get("live_status") not in ACTIONABLE for row in rows)
-        rows = [row for row in rows if row.get("live_status") in ACTIONABLE]
+        rows, live_health, live_excluded = validate_pattern_rows(rows)
     rows.sort(key=lambda row: row["score"], reverse=True)
     for rank, row in enumerate(rows, 1):
         row["rank"] = rank
@@ -173,8 +169,45 @@ def run_pattern_scan(*, source: str = "yf", tickers: list[str] | None = None,
         "earnings_excluded": excluded, "live_excluded": live_excluded,
         "live_health": live_health,
         "rows": rows,
+        "portfolio_controls": {
+            "timeframe": "completed daily bars only",
+            "entry_timing": "near the daily close after confirmation",
+            "risk_per_trade_pct": 1.0,
+            "promotion_rule": "consider 1.5% only after 100 logged out-of-sample trades",
+            "max_new_trades_per_day": 2,
+            "max_open_scanner_trades": 5,
+            "position_size_formula": "risk capital / absolute(entry - initial stop)",
+        },
+        "methodology_notes": [
+            "Structural reversal patterns require a measurable preceding trend.",
+            "Initial ATR stops and structural invalidations are displayed separately.",
+            "The next tested support/resistance zone is preferred when it offers adequate room; measured moves remain fallbacks.",
+            "Two-bar swing setups are daily-only, reject doji-like bars, target the 20 EMA and time out after five sessions.",
+            "Rounding bottoms/tops are not mixed into this daily scanner; they require a separate weekly/monthly investor model.",
+        ],
         "architecture": ["completed split-adjusted daily OHLCV", "pattern geometry",
                          "momentum + relative strength + volume + market/sector context",
                          "lifecycle and price-order sanity gates", "3-10 candidates",
                          "mandatory visual review", "separate TWS intraday validation"],
     }
+
+
+def validate_pattern_rows(rows: list[dict]) -> tuple[list[dict], dict, int]:
+    """Validate an existing shortlist without rerunning the Yahoo universe scan.
+
+    The browser's live button is deliberately a cheap second-stage operation:
+    it reuses the completed daily geometry already shown to the user and asks
+    TWS only for the finalist quotes.
+    """
+    from core.ib_client import with_ib
+    from core.stock_data import quotes_tws
+
+    current = deepcopy(rows)
+    quotes = with_ib(lambda ib: quotes_tws(ib, [row["ticker"] for row in current]))
+    current, health = add_live_patterns(current, quotes)
+    excluded = sum(row.get("live_status") not in ACTIONABLE for row in current)
+    current = [row for row in current if row.get("live_status") in ACTIONABLE]
+    current.sort(key=lambda row: row["score"], reverse=True)
+    for rank, row in enumerate(current, 1):
+        row["rank"] = rank
+    return current, health, excluded

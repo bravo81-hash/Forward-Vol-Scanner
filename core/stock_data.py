@@ -50,8 +50,11 @@ def histories_yf(symbols: list[str], period: str = "2y", *,
     unique = list(dict.fromkeys([s.upper() for s in symbols]))
     # Pattern geometry must be split/dividend adjusted.  Unadjusted history can
     # manufacture false gaps, bases and measured-move targets around splits.
+    # Bound each Yahoo request.  Without an explicit timeout a failed Yahoo
+    # connection can leave the synchronous Flask endpoint open indefinitely,
+    # which browsers surface as an empty/truncated JSON response.
     data = yf.download(unique, period=period, interval="1d", auto_adjust=True,
-                       group_by="ticker", progress=False, threads=True)
+                       group_by="ticker", progress=False, threads=8, timeout=20)
     result = {}
     multi = getattr(data.columns, "nlevels", 1) > 1
     for symbol in unique:

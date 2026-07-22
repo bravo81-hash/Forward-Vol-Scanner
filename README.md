@@ -9,14 +9,32 @@ ranks geometry with momentum, relative strength, volume, broad-market and
 identity-backed sector context. Only the final shortlist is sent to TWS for a
 separate live-price overlay.
 
-Patterns include flat base/VCP, cup and handle, inverse head and shoulders,
-double bottom, ascending triangle, head and shoulders top, double top, bull
-flag and bear flag. Rows are separated into forming, near-trigger,
+Structural patterns include bullish flat base/VCP, bearish rectangle, cup and
+handle, inverse head and shoulders, double bottom, ascending triangle, head and
+shoulders top, double top, bull flag and bear flag. Reversal structures now
+require a measurable preceding trend. A separate daily mean-reversion family
+detects twizzler tops/bottoms, body-engulfing reversals, the course-defined
+two-bar thrust reversal and 3-EMA left-out-candle setups. These two-bar signals
+reject doji-like setup bars, must point toward the 20 EMA and time out after
+five sessions.
+
+Rows are separated into forming, near-trigger,
 close-confirmed, retesting and live intraday-trigger states. Confirmations
 expire after three completed bars unless price is making a valid retest; setups
 also expire after ten bars, a 2-ATR extension, or target achievement. Every row
-includes pattern dates, pivot dates and an inspectable chart. Ranking scores are
-heuristics—not probabilities—and every result requires visual review.
+separates the 1-ATR initial stop from structural invalidation, finds tested S/R
+as price zones, shows the preferred S/R target alongside the measured move,
+calculates available R-multiple room and applies a proportional time exit.
+The Inspect Chart view plots those levels, S/R zones and exact detector pivots.
+Ranking scores are heuristics—not probabilities—and every result requires
+visual review.
+
+The scanner publishes the operating limits rather than pretending to enforce
+broker positions: risk 1% of allocated swing capital per trade, no more than
+two new scanner trades per day and no more than five open scanner trades. A
+move to 1.5% risk belongs only after 100 logged out-of-sample trades. Weekly or
+monthly rounding bottoms/tops are intentionally excluded from the daily engine;
+they need a separate investor-horizon detector and validation set.
 
 Quick test:
 

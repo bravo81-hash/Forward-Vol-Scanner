@@ -9,9 +9,9 @@ def ema(s: pd.Series, n: int) -> pd.Series:
 
 def atr(df: pd.DataFrame, n: int | None = None) -> pd.Series:
     n = n or 14
-    h, l, c = df["high"], df["low"], df["close"]
+    h, low, c = df["high"], df["low"], df["close"]
     pc = c.shift(1)
-    tr = pd.concat([(h - l), (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+    tr = pd.concat([(h - low), (h - pc).abs(), (low - pc).abs()], axis=1).max(axis=1)
     return tr.ewm(span=n, adjust=False).mean()
 
 
@@ -59,13 +59,13 @@ def cluster(levels, tol: float):
 def adx(df: pd.DataFrame, n: int | None = None):
     """Wilder ADX with +DI/-DI. Returns (adx, plus_di, minus_di) Series."""
     n = n or 14
-    h, l, c = df["high"], df["low"], df["close"]
+    h, low, c = df["high"], df["low"], df["close"]
     up = h.diff()
-    dn = -l.diff()
+    dn = -low.diff()
     plus_dm = up.where((up > dn) & (up > 0), 0.0)
     minus_dm = dn.where((dn > up) & (dn > 0), 0.0)
     pc = c.shift(1)
-    tr = pd.concat([(h - l), (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+    tr = pd.concat([(h - low), (h - pc).abs(), (low - pc).abs()], axis=1).max(axis=1)
     a = 1.0 / n  # Wilder smoothing
     atr_n = tr.ewm(alpha=a, adjust=False).mean()
     plus_di = 100 * plus_dm.ewm(alpha=a, adjust=False).mean() / atr_n

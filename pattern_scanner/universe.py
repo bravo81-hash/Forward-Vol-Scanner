@@ -6,6 +6,7 @@ subset is used instead so the scanner always runs. Requires network for the
 Wikipedia fetch; the ETF + fallback lists are local.
 """
 import io
+from functools import lru_cache
 
 import pandas as pd
 
@@ -20,7 +21,7 @@ def _read_tables(url):
     """Fetch HTML tables with a real user-agent (Wikipedia blocks the default)."""
     try:
         import requests  # bundled with yfinance
-        r = requests.get(url, headers=_HEADERS, timeout=20)
+        r = requests.get(url, headers=_HEADERS, timeout=6)
         r.raise_for_status()
         return pd.read_html(io.StringIO(r.text))
     except ImportError:
@@ -38,7 +39,7 @@ def _github_sp500():
     """Cloud-reachable S&P 500 fallback source. Returns a symbol list or None."""
     try:
         import requests
-        r = requests.get(_GH_SP500_CSV, headers=_HEADERS, timeout=20)
+        r = requests.get(_GH_SP500_CSV, headers=_HEADERS, timeout=6)
         r.raise_for_status()
         df = pd.read_csv(io.StringIO(r.text))
         col = "Symbol" if "Symbol" in df.columns else df.columns[0]
@@ -137,7 +138,8 @@ def _wiki_safe(url, cols):
         return None
 
 
-def build_universe(verbose=True):
+@lru_cache(maxsize=1)
+def _build_universe_cached():
     """S&P 500 + NASDAQ-100 + liquid ETFs, resilient to a Wikipedia 403.
 
     Order of preference for the S&P 500: Wikipedia (authoritative, current) ->
@@ -164,9 +166,15 @@ def build_universe(verbose=True):
     else:
         syms |= set(FALLBACK_STOCKS)   # covers major NDX/growth names off-Wikipedia
 
+    return tuple(sorted(syms)), src
+
+
+def build_universe(verbose=True):
+    """Return the current US universe, reusing it for the life of the app."""
+    syms, src = _build_universe_cached()
     if verbose:
         print(f"[universe] {len(syms)} symbols (S&P 500 via {src})")
-    return sorted(syms)
+    return list(syms)
 
 
 def universe_for(market="us", verbose=True):

@@ -1,9 +1,16 @@
 import numpy as np
 import pandas as pd
 import json
+import threading
+import time
 
 from pattern_scanner.patterns import PatternCandidate, classify, detect_all
-from pattern_scanner.scanner import _sector_for, live_pattern_status, scan_patterns
+from pattern_scanner.scanner import (
+    _sector_for,
+    _support_resistance_zones,
+    live_pattern_status,
+    scan_patterns,
+)
 
 
 def bars(close, volume=None):
@@ -59,7 +66,45 @@ def test_double_bottom_geometry_is_detected():
     second = np.r_[np.linspace(108, 91, 14), np.linspace(91, 107, 15)]
     finish = np.r_[np.linspace(107, 107.5, 7), 110.5]
     found = detect_all("DB", bars(np.r_[lead, first, middle, second, finish]))
-    assert any(x.code == "P4" for x in found)
+    row = next(x for x in found if x.code == "P4")
+    assert row.initial_stop < row.trigger
+    assert row.stretch_target > row.target
+    assert "second-bottom volume" in row.volume_pattern
+    assert row.prior_trend_pct < 0
+
+
+def test_reversal_patterns_require_a_real_preceding_trend():
+    # The same two troughs embedded in a prior uptrend are not a double bottom.
+    lead = np.linspace(80, 110, 80)
+    first = np.r_[np.linspace(110, 96, 12), np.linspace(96, 108, 12)]
+    middle = np.linspace(108, 112, 8)
+    second = np.r_[np.linspace(112, 97, 14), np.linspace(97, 111, 15)]
+    finish = np.r_[np.linspace(111, 111.5, 7), 114]
+    assert not any(x.code == "P4" for x in detect_all("NOTDB", bars(
+        np.r_[lead, first, middle, second, finish])))
+
+
+def test_double_top_uses_half_depth_first_and_full_depth_stretch():
+    lead = np.linspace(80, 105, 80)
+    first = np.r_[np.linspace(105, 120, 12), np.linspace(120, 106, 12)]
+    middle = np.linspace(106, 102, 8)
+    second = np.r_[np.linspace(102, 119, 14), np.linspace(119, 103, 15)]
+    finish = np.r_[np.linspace(103, 102.5, 7), 99.5]
+    row = next(x for x in detect_all("DT", bars(
+        np.r_[lead, first, middle, second, finish])) if x.code == "P7")
+    assert row.stretch_target < row.target < row.trigger
+    assert row.max_hold_bars == (row.formation_bars // 2)
+    assert "Volume is not a mandatory" in row.volume_pattern
+
+
+def test_bearish_rectangle_requires_downtrend_and_can_confirm_breakdown():
+    down = np.linspace(140, 100, 100)
+    rectangle = np.tile([97, 102, 98, 101], 10)
+    row = next(x for x in detect_all("RECT", bars(
+        np.r_[down, rectangle, 95])) if x.code == "P10")
+    assert row.status == "CLOSE_CONFIRMED"
+    assert row.prior_trend_pct < 0
+    assert row.initial_stop > row.trigger
 
 
 def test_cup_handle_geometry_is_detected():
@@ -96,7 +141,10 @@ def test_ascending_triangle_geometry_is_detected():
         seq.extend(np.linspace(100, low, 6))
     seq.extend(np.linspace(96, 101.5, 7))
     found = detect_all("TRI", bars(np.r_[prior, seq]))
-    assert any(x.code == "P5" for x in found)
+    row = next(x for x in found if x.code == "P5")
+    assert row.initial_stop < row.trigger
+    assert row.max_hold_bars >= 5
+    assert row.prior_trend_pct > 0
 
 
 def test_flag_geometry_is_detected():
@@ -108,6 +156,56 @@ def test_flag_geometry_is_detected():
                    np.full(len(flag) + len(last), 900_000)]
     found = detect_all("FLAG", bars(np.r_[lead, pole, flag, last], volume))
     assert any(x.code == "P8" for x in found)
+
+
+def test_daily_engulfing_swing_targets_20ema_and_rejects_doji():
+    d = bars(np.r_[np.linspace(145, 108, 95), 104, 102, 104.5])
+    d.iloc[-2, d.columns.get_loc("open")] = 104.0
+    d.iloc[-2, d.columns.get_loc("close")] = 102.0
+    d.iloc[-2, d.columns.get_loc("high")] = 104.5
+    d.iloc[-2, d.columns.get_loc("low")] = 101.5
+    d.iloc[-1, d.columns.get_loc("open")] = 101.5
+    d.iloc[-1, d.columns.get_loc("close")] = 104.5
+    d.iloc[-1, d.columns.get_loc("high")] = 105.0
+    d.iloc[-1, d.columns.get_loc("low")] = 101.0
+    found = detect_all("ENG", d)
+    row = next(x for x in found if x.code == "S3")
+    assert row.setup_family == "swing_reversion"
+    assert row.status == "CLOSE_CONFIRMED"
+    assert row.max_hold_bars == 5
+    assert row.target > row.trigger
+    assert row.stop_basis == "daily close"
+
+    doji = d.copy()
+    doji.iloc[-2, doji.columns.get_loc("open")] = 102.01
+    doji.iloc[-2, doji.columns.get_loc("close")] = 102.0
+    assert not any(x.code == "S3" for x in detect_all("DOJI", doji))
+
+
+def test_support_resistance_is_a_tested_zone_not_an_exact_line():
+    close = np.r_[np.linspace(80, 100, 40), np.tile([98, 102, 99, 101.8], 12)]
+    d = bars(close)
+    zones = _support_resistance_zones(d, atr=2.0)
+    assert zones
+    tested = [z for z in zones if z["tests"] >= 2]
+    assert tested
+    assert all(z["low"] < z["center"] < z["high"] for z in zones)
+
+
+def test_strong_reversal_candle_adds_short_horizon_sr_but_not_tested_zone():
+    d = bars(np.linspace(125, 100, 65))
+    d.iloc[-2, d.columns.get_loc("open")] = 100.0
+    d.iloc[-2, d.columns.get_loc("close")] = 100.8
+    d.iloc[-2, d.columns.get_loc("high")] = 101.0
+    d.iloc[-2, d.columns.get_loc("low")] = 95.0
+    d.iloc[-1, d.columns.get_loc("open")] = 100.8
+    d.iloc[-1, d.columns.get_loc("close")] = 102.0
+    d.iloc[-1, d.columns.get_loc("high")] = 102.5
+    d.iloc[-1, d.columns.get_loc("low")] = 100.0
+    zones = _support_resistance_zones(d, atr=2.0)
+    candle = next(z for z in zones if z["source"] == "strong reversal candle")
+    assert candle["kind"] == "support"
+    assert candle["tests"] == 1
 
 
 def test_pipeline_returns_only_actionable_by_default_and_scores_context():
@@ -153,6 +251,93 @@ def test_pattern_module_page_and_api(monkeypatch):
     response = client.get("/api/patterns/scan?source=mock&tickers=AAPL,MSFT")
     assert response.status_code == 200
     assert response.get_json()["module"] == "price_action_patterns"
+    assert response.get_json()["scan_id"]
+    page = client.get("/patterns").get_data(as_text=True)
+    assert "Initial stop" in page
+    assert "shaded bands are tested S/R zones" in page
+
+
+def test_live_endpoint_reuses_cached_shortlist_without_rerunning_scan(monkeypatch):
+    import pattern_scanner.service as service
+    from webapp import app, _pattern_scan_cache
+
+    expected = {
+        "module": "price_action_patterns", "rows": [{"ticker": "AAPL", "score": .8}],
+        "universe_requested": 1, "symbols_with_bars": 1, "liquid_symbols": 1,
+        "geometry_count": 1, "context_count": 1, "actionable_count": 1,
+    }
+    calls = {"scan": 0, "live": 0}
+    def scan(**kwargs):
+        calls["scan"] += 1
+        return expected
+    def live(rows):
+        calls["live"] += 1
+        return [{**rows[0], "live": 200.0, "live_status": "NEAR_TRIGGER"}], {"fresh": 1, "total": 1, "ok": True}, 0
+
+    _pattern_scan_cache.clear()
+    monkeypatch.setattr(service, "run_pattern_scan", scan)
+    monkeypatch.setattr(service, "validate_pattern_rows", live)
+    client = app.test_client()
+    daily = client.get("/api/patterns/scan?source=mock")
+    scan_id = daily.get_json()["scan_id"]
+    response = client.post("/api/patterns/live", json={"scan_id": scan_id})
+    assert response.status_code == 200
+    assert response.get_json()["rows"][0]["live"] == 200.0
+    assert calls == {"scan": 1, "live": 1}
+
+
+def test_live_endpoint_rejects_missing_or_expired_scan():
+    from webapp import app, _pattern_scan_cache
+    _pattern_scan_cache.clear()
+    response = app.test_client().post("/api/patterns/live", json={"scan_id": "missing"})
+    assert response.status_code == 409
+    assert "Run the daily scan again" in response.get_json()["error"]
+
+
+def test_background_scan_job_avoids_long_lived_http_request(monkeypatch):
+    import pattern_scanner.service as service
+    from webapp import app, _pattern_scan_jobs
+
+    release = threading.Event()
+    expected = {
+        "module": "price_action_patterns", "rows": [], "universe_requested": 2,
+        "symbols_with_bars": 2, "liquid_symbols": 2, "geometry_count": 0,
+        "context_count": 0, "actionable_count": 0,
+    }
+
+    def scan(**kwargs):
+        release.wait(timeout=2)
+        return expected
+
+    _pattern_scan_jobs.clear()
+    monkeypatch.setattr(service, "run_pattern_scan", scan)
+    client = app.test_client()
+    started = client.post("/api/patterns/scan/start?source=mock&tickers=AAPL,MSFT")
+    assert started.status_code == 202
+    job_id = started.get_json()["job_id"]
+    assert client.get(f"/api/patterns/scan/status/{job_id}").status_code == 202
+
+    release.set()
+    for _ in range(100):
+        response = client.get(f"/api/patterns/scan/status/{job_id}")
+        if response.status_code == 200:
+            break
+        time.sleep(.01)
+    assert response.status_code == 200
+    assert response.get_json()["module"] == "price_action_patterns"
+    assert response.get_json()["scan_id"]
+
+
+def test_codespaces_disables_local_tws_validation(monkeypatch):
+    from webapp import app
+
+    monkeypatch.setenv("CODESPACES", "true")
+    capabilities = app.test_client().get("/api/patterns/capabilities")
+    assert capabilities.status_code == 200
+    assert capabilities.get_json()["tws_validation"] is False
+    response = app.test_client().post("/api/patterns/live", json={"scan_id": "unused"})
+    assert response.status_code == 409
+    assert "unavailable in Codespaces" in response.get_json()["error"]
 
 
 def test_stale_breakout_and_target_hit_are_expired():
@@ -222,6 +407,8 @@ def test_yahoo_history_requests_adjusted_prices(monkeypatch):
     monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
     out = histories_yf(["ABC"], completed_only=False)
     assert captured["auto_adjust"] is True
+    assert captured["timeout"] == 20
+    assert captured["threads"] == 8
     assert out["ABC"][0]["close"] == 100.0
 
 
