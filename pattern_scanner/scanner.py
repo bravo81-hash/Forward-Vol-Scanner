@@ -129,6 +129,98 @@ def _aligned_score(side: str, bias: str | None):
     return 1.0 if ((side == "long") == (bias == "bullish")) else 0.0
 
 
+def _support_resistance_zones(d: pd.DataFrame, atr: float) -> list[dict]:
+    """Cluster confirmed pivots into price zones, not false-precision lines."""
+    if atr <= 0 or len(d) < 20:
+        return []
+    x = d.tail(260)
+    high, low = x["high"].to_numpy(float), x["low"].to_numpy(float)
+    raw = []
+    for i in range(3, len(x) - 3):
+        if high[i] == np.max(high[i - 3:i + 4]):
+            raw.append((float(high[i]), "resistance", i))
+        if low[i] == np.min(low[i - 3:i + 4]):
+            raw.append((float(low[i]), "support", i))
+    tolerance = 0.50 * atr
+    groups: list[list[tuple[float, str, int]]] = []
+    for point in sorted(raw, key=lambda z: z[0]):
+        if groups and abs(point[0] - np.mean([p[0] for p in groups[-1]])) <= tolerance:
+            groups[-1].append(point)
+        else:
+            groups.append([point])
+    zones = []
+    for group in groups:
+        if len(group) < 2:
+            continue
+        center = float(np.mean([p[0] for p in group]))
+        supports = sum(p[1] == "support" for p in group)
+        kind = "support" if supports > len(group) / 2 else "resistance"
+        zones.append({
+            "center": round(center, 4),
+            "low": round(center - 0.25 * atr, 4),
+            "high": round(center + 0.25 * atr, 4),
+            "tests": len(group),
+            "kind": kind,
+            "last_test_date": pd.Timestamp(x.index[max(p[2] for p in group)]).date().isoformat(),
+            "source": "confirmed pivot cluster",
+        })
+    # Strong reversal candles can create a short-horizon level, but they stay
+    # visibly distinct from multi-tested structural zones and never become a
+    # preferred target by themselves. Gapped/island candles are excluded.
+    for i in range(max(4, len(x) - 40), len(x) - 1):
+        row, previous, confirmation = x.iloc[i], x.iloc[i - 1], x.iloc[i + 1]
+        spread = float(row["high"] - row["low"])
+        if spread <= 0 or float(row["low"]) > float(previous["high"]) or float(row["high"]) < float(previous["low"]):
+            continue
+        body = abs(float(row["close"] - row["open"]))
+        lower = min(float(row["open"]), float(row["close"])) - float(row["low"])
+        upper = float(row["high"]) - max(float(row["open"]), float(row["close"]))
+        prior = x["close"].iloc[i - 3:i].to_numpy(float)
+        down = len(prior) == 3 and prior[-1] < prior[0]
+        up = len(prior) == 3 and prior[-1] > prior[0]
+        doji = body / spread <= 0.10
+        hammer = down and lower >= max(2 * body, 0.45 * spread) and upper <= 0.25 * spread
+        shooting = up and upper >= max(2 * body, 0.45 * spread) and lower <= 0.25 * spread
+        confirmed_doji_support = doji and down and float(confirmation["close"]) > float(row["high"])
+        confirmed_doji_resistance = doji and up and float(confirmation["close"]) < float(row["low"])
+        if hammer or confirmed_doji_support:
+            center, kind = float(row["low"]), "support"
+        elif shooting or confirmed_doji_resistance:
+            center, kind = float(row["high"]), "resistance"
+        else:
+            continue
+        zones.append({
+            "center": round(center, 4), "low": round(center - 0.15 * atr, 4),
+            "high": round(center + 0.15 * atr, 4), "tests": 1, "kind": kind,
+            "last_test_date": pd.Timestamp(x.index[i]).date().isoformat(),
+            "source": "confirmed reversal candle" if doji else "strong reversal candle",
+        })
+    return zones
+
+
+def _trade_location(c: PatternCandidate, d: pd.DataFrame, atr: float):
+    """Select the next tested S/R zone while preserving the measured target."""
+    zones = _support_resistance_zones(d, atr)
+    stop = float(c.initial_stop if c.initial_stop is not None else c.invalidation)
+    risk = abs(float(c.trigger) - stop)
+    if c.setup_family == "swing_reversion":
+        preferred = float(c.target)
+        basis = "20 EMA mean reversion"
+    elif c.side == "long":
+        choices = [z for z in zones if z["tests"] >= 2
+                   and z["kind"] == "resistance" and z["center"] > c.trigger + 0.25 * atr]
+        preferred = min(choices, key=lambda z: z["center"])["center"] if choices else float(c.target)
+        basis = "next tested resistance zone" if choices else c.target_basis
+    else:
+        choices = [z for z in zones if z["tests"] >= 2
+                   and z["kind"] == "support" and z["center"] < c.trigger - 0.25 * atr]
+        preferred = max(choices, key=lambda z: z["center"])["center"] if choices else float(c.target)
+        basis = "next tested support zone" if choices else c.target_basis
+    reward = (preferred - c.trigger if c.side == "long" else c.trigger - preferred)
+    rr = reward / risk if risk > 0 else 0.0
+    return zones, round(float(preferred), 4), basis, round(float(rr), 2)
+
+
 def _sector_for(ticker: str, daily: pd.DataFrame, sectors: dict[str, pd.DataFrame],
                 bench_ret: float | None, known_sector: str | None = None):
     """Return an identity-backed sector label and a context proxy.
@@ -225,10 +317,25 @@ def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
             if c.side == "short":
                 sector_score = 1 - sector_score
         market_score = _aligned_score(c.side, bench_bias)
-        context = (0.32 * momentum + 0.25 * rs_score + 0.18 * sector_score
-                   + 0.15 * volume + 0.10 * market_score)
+        if c.setup_family == "swing_reversion":
+            context = (0.30 * rs_score + 0.25 * sector_score
+                       + 0.15 * volume + 0.30 * market_score)
+        elif c.code == "P7":
+            # Double-top volume has weak standalone value; price structure and
+            # relative weakness carry more weight.
+            context = (0.36 * momentum + 0.28 * rs_score + 0.21 * sector_score
+                       + 0.05 * volume + 0.10 * market_score)
+        else:
+            context = (0.32 * momentum + 0.25 * rs_score + 0.18 * sector_score
+                       + 0.15 * volume + 0.10 * market_score)
+        zones, preferred_target, preferred_basis, room_rr = _trade_location(
+            c, daily, float(ind.atr(daily).iloc[-1]))
+        status_bonus = STATUS_BONUS.get(c.status, 0.0)
+        if c.code in {"P1", "P5", "P10"} and c.status == "RETESTING":
+            status_bonus = 0.04  # clean breaks rank above throwbacks for these patterns
+        location_adjustment = 0.03 if room_rr >= 2 else (-0.06 if room_rr < 1 else 0.0)
         final = _clip(0.55 * c.geometry_score + 0.35 * context
-                      + STATUS_BONUS.get(c.status, 0.0))
+                      + status_bonus + location_adjustment)
         if context < min_context and c.geometry_score < 0.75:
             continue
         row = c.row()
@@ -251,6 +358,12 @@ def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
             "last": round(float(daily["close"].iloc[-1]), 2),
             "data_as_of": pd.Timestamp(daily.index[-1]).date().isoformat(),
             "atr": round(float(ind.atr(daily).iloc[-1]), 2),
+            "preferred_target": preferred_target,
+            "preferred_target_basis": preferred_basis,
+            "room_rr": room_rr,
+            "support_resistance_zones": zones,
+            "trade_location": ("BLOCKED" if room_rr < 1 else
+                               "MARGINAL" if room_rr < 1.5 else "CLEAR"),
             "spark": [round(float(x), 4) for x in daily["close"].tail(90)],
             "chart": {
                 "dates": [pd.Timestamp(x).date().isoformat() for x in daily.tail(220).index],
@@ -260,8 +373,8 @@ def scan_patterns(bundle: dict, bench_daily: pd.DataFrame | None = None,
                 "close": [round(float(x), 4) for x in daily["close"].tail(220)],
             },
             "review": "REQUIRED",
-            "review_reason": "Confirm clean shape, trade location and nearby support/resistance on chart",
-            "time_exit": 20,
+            "review_reason": "Confirm the marked pivots, prior trend, trigger, S/R room and time exit on chart",
+            "time_exit": c.max_hold_bars,
         })
         rows.append(row)
 
@@ -282,6 +395,17 @@ def live_pattern_status(row: dict, live_price: float):
     side = row["side"]
     if atr <= 0:
         return row.get("status", ""), None
+    if row.get("setup_family") == "swing_reversion":
+        stop = float(row.get("initial_stop") or invalid)
+        if side == "long":
+            status = ("FAILED" if live_price < stop else
+                      "EXPIRED" if live_price >= target else "CLOSE_CONFIRMED")
+            distance = (target - live_price) / atr
+        else:
+            status = ("FAILED" if live_price > stop else
+                      "EXPIRED" if live_price <= target else "CLOSE_CONFIRMED")
+            distance = (live_price - target) / atr
+        return status, round(distance, 2)
     pen, ret = 0.25 * atr, 0.35 * atr
     if side == "long":
         distance = (trigger - live_price) / atr
