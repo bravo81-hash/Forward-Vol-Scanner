@@ -1,0 +1,494 @@
+//@version=5
+// ============================================================================
+// TE CONSOLE v2.6 — Action-First Decision Dashboard (single ticker, no manual)
+//
+// v2.6 changes (frequency calibration — backtested on 150d real SPX/VIX data;
+// v2.5 stood aside 57% of days, v2.6 targets ~25-30% with doctrine intact):
+//  T1 NRM + trend was the missing matrix cell (12.7% of days -> MARGINAL ->
+//     STAND ASIDE, every one with VRP > 0). Now routes to DIAGONAL on the
+//     trend side, same as the CMP+trend cell.
+//  T2 STR graduated. IVpctl > 85 was a blanket hard stop (28% of days), but
+//     14 of those 42 backtest days were stressed-but-RICH (VRP > +2, realized
+//     falling) — the best-paid selling days of the year. Those now print
+//     "PUT BWB — QUARTER SIZE"; VRP <= +2 or rising RV still stands aside.
+//  T3 Pair engine: front window restored to 12-21d (the fd-holdMax>=7 rule
+//     had silently pinned fronts to a single 17-21d Friday, halving pair
+//     availability 77% -> 47%; short fronts now just carry an earlier exit
+//     note). FOMC-between-the-legs is a WARNING, no longer an exclusion —
+//     you hold long back vega through the print, which is a choice, not a
+//     forbidden state.
+//  R2 Spike gate now measures the console's own vol index (VXN/RVX on
+//     QQQ/RUT), not VIX unconditionally.
+//
+// v2.5 change:
+//  P0-b STRATEGY/EXPIRY self-contradiction fix. v2.4's P0 could recommend
+//     "DEBIT CALENDAR — HALF SIZE" while the pair search below it found
+//     nothing (EXPIRY: "NO VALID PAIR") — confirmed live on the SPX dashboard
+//     (Jul 1: VRP -3.3v, contango, but no Friday pair cleared the DTE/event
+//     filters). The two rows were computed independently and never checked
+//     each other. Now: if a CALENDAR/DIAGONAL strategy is on the board and
+//     the pair search comes back empty, the strategy downgrades to
+//     NO PREMIUM SELLING (if it was the P0 debit-calendar case) or MARGINAL
+//     — SKIPPING IS FINE (if it was a calm-vol/front-rich calendar), so ACT
+//     and EXPIRY can never disagree again.
+//
+// v2.4 changes (accuracy-parity with fwdvol engine audit, Jul 2026):
+//  P0 VRP<=0 is no longer a blanket STAND ASIDE. In contango it now prints
+//     "DEBIT CALENDAR — HALF SIZE" under TRADE — CAUTION, matching the ranker
+//     doctrine: selling is unpaid, so buy the cheap back leg instead of
+//     standing down entirely. Non-contango VRP<=0 still stands aside.
+//  P1 ta.stdev is POPULATION (/n); the audited engine uses SAMPLE (/(n-1)).
+//     rv7 / rv21 / rvcc10 now corrected by sqrt(n/(n-1)) — rv7 +8.0%,
+//     rv21 +2.5%. (Jul 1 check: rv21 16.91→17.33, VRP −0.32→−0.74 — the two
+//     dashboards now flip on the SAME day at the VRP=0 boundary.)
+//  P4 OpEx day-of-week anchor pinned to NOON New York — same hardening class
+//     as the v2.3 FOMC fix; removes timestamp() timezone ambiguity.
+//
+// v2.3 change:
+//  * FOMC COUNTDOWN FIX: f_fomcDte previously used floor((FOMC - nowT)/day)+1
+//    with a >= 0 test. Because nowT (the daily bar's time) sits at session
+//    START while FOMC is stamped 14:00 ET, a print that had ALREADY happened
+//    up to ~24h earlier computed d = 0 — so the dashboard showed "FOMC in 0d"
+//    the DAY AFTER an FOMC, and the *FOMC tag / gate / warnings persisted.
+//    Now: anchor to NOON ET of the bar's own calendar date and round the day
+//    gap. Same-day FOMC = 0 (loud when it matters), day-after = -1 (excluded).
+//    Everything keyed off fomcD (gateF, gateK, warnings, *FOMC tag, expiry
+//    pair filter) clears automatically the session after the print.
+//
+// v2.2 changes:
+//  a. BAR-ANCHORED DATES: FOMC countdown + expiry engine anchor to the chart's
+//     LAST BAR date (dT), not the wall clock — replay-aware.
+//  b. Table position input: Top right / Bottom right.
+//  c. Text wrapping: long cell values wrap so the table stays narrow.
+//
+// v2.1 changes:
+//  1. DATA FRESHNESS: all security() calls use lookahead_on — dashboard shows
+//     the LATEST daily values (live intraday, today's close after the bell).
+//     Table renders on the last bar only, so historical repaint is moot.
+//  2. "Data:" header row shows exactly which session's close is in use.
+//  3. Chart decluttered: 21 EMA + expected-move cone + regime ribbon only.
+//  4. Action-first layout: ACT rows (verdict/strategy/expiry/size) then WHY
+//     rows; raw numbers live in tooltips.
+//
+// PROXIES (no exact TV feed): dealer-gamma = behavioral proxy (autocorr +
+// range-fade + trend + VIX trend), term = SPX curve scaled by VXN/RVX ratio,
+// skew = CBOE SKEW (SPX-derived), events = embedded 2026 FOMC dates (UPDATE
+// EACH JANUARY, line ~75) + front-kink detector. Expiry engine interpolates
+// IV in total variance through VIX9D/VIX/VIX3M — confirm pairs on the real
+// chain (fwdvol_scanner.py) before sizing.
+// ============================================================================
+indicator("TE Console v2.6", overlay=true)
+
+// ---------------------------------------------------------------- INPUTS ---
+grpS    = "Symbols"
+symVIX  = input.symbol("CBOE:VIX",   "VIX",    group=grpS)
+symV9D  = input.symbol("CBOE:VIX9D", "VIX9D",  group=grpS)
+symV3M  = input.symbol("CBOE:VIX3M", "VIX3M",  group=grpS)
+symVVIX = input.symbol("CBOE:VVIX",  "VVIX",   group=grpS)
+symVXN  = input.symbol("CBOE:VXN",   "VXN",    group=grpS)
+symRVX  = input.symbol("CBOE:RVX",   "RVX",    group=grpS)
+symSKEW = input.symbol("CBOE:SKEW",  "SKEW",   group=grpS)
+symHYG  = input.symbol("AMEX:HYG",   "HYG",    group=grpS)
+symSPX  = input.symbol("SP:SPX",     "SPX ref",group=grpS)
+
+grpP    = "Parameters"
+zLen    = input.int(252,  "Z / percentile lookback (d)", group=grpP)
+adxThr  = input.int(20,   "ADX trend threshold",         group=grpP)
+vixSpk  = input.float(12, "VIX day-change gate (%)",     group=grpP)
+holdMax = input.int(10,   "Max planned hold (d)",        group=grpP)
+fEnt    = input.int(12,   "Front DTE min", group=grpP)
+fEnd    = input.int(21,   "Front DTE max", group=grpP)
+bEnt    = input.int(26,   "Back DTE min",  group=grpP)
+bEnd    = input.int(45,   "Back DTE max",  group=grpP)
+
+grpC     = "Chart"
+showEMA  = input.bool(true,  "21 EMA",                    group=grpC)
+showEM   = input.bool(true,  "Expected-move cone (hold)", group=grpC)
+showRib  = input.bool(true,  "Regime ribbon",             group=grpC)
+txtBig   = input.bool(false, "Larger table text",         group=grpC)
+posIn    = input.string("Top right", "Dashboard position", options=["Top right", "Bottom right"], group=grpC)
+
+// ------------------------------------------------- EMBEDDED FOMC CALENDAR ---
+// 2026 decision days (14:00 ET). UPDATE EACH JANUARY.
+var int[] FOMC = array.from(
+     timestamp("America/New_York", 2026,  1, 28, 14, 0),
+     timestamp("America/New_York", 2026,  3, 18, 14, 0),
+     timestamp("America/New_York", 2026,  4, 29, 14, 0),
+     timestamp("America/New_York", 2026,  6, 17, 14, 0),
+     timestamp("America/New_York", 2026,  7, 29, 14, 0),
+     timestamp("America/New_York", 2026,  9, 16, 14, 0),
+     timestamp("America/New_York", 2026, 10, 28, 14, 0),
+     timestamp("America/New_York", 2026, 12,  9, 14, 0))
+
+MS_DAY = 86400000
+
+// Days until next FOMC, anchored to NOON ET of the bar's own calendar date.
+// round() of the day gap: same-day = 0, day-after = -1 (excluded). This is
+// the v2.3 fix — the old floor()+1 / >=0 form leaked a past print as 0d.
+f_fomcDte(nowT) =>
+    y  = year(nowT, "America/New_York")
+    m  = month(nowT, "America/New_York")
+    dd = dayofmonth(nowT, "America/New_York")
+    anchor = timestamp("America/New_York", y, m, dd, 12, 0)
+    best = 999
+    for i = 0 to array.size(FOMC) - 1
+        d = int(math.round((array.get(FOMC, i) - anchor) / MS_DAY))
+        if d >= 0 and d < best
+            best := d
+    best
+
+// -------------------------------------------------------- SURFACE DETECT ---
+tk      = syminfo.ticker
+isLC    = tk == "SPX" or tk == "SPY" or str.startswith(tk, "ES")
+isTech  = tk == "NDX" or tk == "QQQ" or str.startswith(tk, "NQ")
+isSC    = tk == "RUT" or tk == "IWM" or str.startswith(tk, "RTY")
+isETF   = tk == "SPY" or tk == "QQQ" or tk == "IWM"
+surfTxt = isTech ? "Tech surface" : isSC ? "Small-cap surface" : "Large-cap surface"
+wrapTxt = isETF ? "ETF — watch assignment/ex-div" : "cash-settled, no assignment"
+
+// --------------------------------------------------------------- HELPERS ---
+f_z(src, len) =>
+    sd = ta.stdev(src, len)
+    sd > 0 ? (src - ta.sma(src, len)) / sd : 0.0
+
+// v2.4 (P1): ta.stdev is population (/n); the engine's realized vol is sample
+// (/(n-1)). Correct by sqrt(n/(n-1)) so both flip on the same day at VRP = 0.
+f_sstd(src, len) =>
+    ta.stdev(src, len) * math.sqrt(len / (len - 1.0))
+
+f_und() =>
+    r      = math.log(close / close[1])
+    rvcc10 = f_sstd(r, 10) * math.sqrt(252) * 100
+    rv7    = f_sstd(r, 7)  * math.sqrt(252) * 100
+    rv21   = f_sstd(r, 21) * math.sqrt(252) * 100
+    park10 = math.sqrt(ta.sma(math.pow(math.log(high / low), 2), 10) / (4 * math.log(2))) * math.sqrt(252) * 100
+    ac20   = ta.correlation(r, r[1], 20)
+    [dip, dim, adx] = ta.dmi(14, 14)
+    atrp   = ta.atr(14) / close * 100
+    [ta.ema(close, 8), ta.ema(close, 21), ta.ema(close, 50), adx, rv7, rv21, rvcc10, park10, ac20, atrp, close, time]
+
+// --------------------------------------- SECURITY (10 calls, lookahead_on) ---
+// lookahead_on = always the latest daily values (live intraday, final after
+// close). Dashboard renders on last bar only, so historical repaint is moot.
+LA = barmerge.lookahead_on
+[e8, e21d, e50, adxD, rv7, rv21, rvcc, park, ac20, atrpD, cD, dT] =
+     request.security(syminfo.tickerid, "D", f_und(), lookahead=LA)
+vix  = request.security(symVIX,  "D", close, lookahead=LA)
+v9d  = request.security(symV9D,  "D", close, lookahead=LA)
+v3m  = request.security(symV3M,  "D", close, lookahead=LA)
+vvix = request.security(symVVIX, "D", close, lookahead=LA)
+vxn  = request.security(symVXN,  "D", close, lookahead=LA)
+rvx  = request.security(symRVX,  "D", close, lookahead=LA)
+skw  = request.security(symSKEW, "D", close, lookahead=LA)
+hygD = request.security(symHYG,  "D", close - ta.ema(close, 21), lookahead=LA)
+spxC = request.security(symSPX,  "D", close, lookahead=LA)
+
+nowT   = dT    // date anchor = the daily bar feeding the dashboard (replay-aware)
+volIdx = isTech ? vxn : isSC ? rvx : vix
+scale  = volIdx / vix
+
+// ------------------------------------------------------------- COMPOSITES ---
+ivp     = ta.percentrank(volIdx, zLen)
+vixChg  = (volIdx / volIdx[1] - 1) * 100   // v2.6 (R2): the console's own index
+vvixZ   = f_z(vvix, zLen)
+ratF    = v9d / vix
+ratB    = vix / v3m
+kinkZ   = f_z(ratF, 60)
+skewZ   = f_z(skw, zLen)
+vrp     = volIdx - rv21
+vrpZ    = f_z(vrp, zLen)
+rvFall  = rv7 < rv21
+
+gSc = 0
+gSc += (ac20 < -0.05 ? 1 : ac20 > 0.05 ? -1 : 0)
+rr   = park > 0 ? rvcc / park : 1.0
+gSc += (rr < 0.90 ? 1 : rr > 1.10 ? -1 : 0)
+gSc += (cD > e50 ? 1 : -1)
+gSc += (vix < ta.sma(vix, 50) ? 1 : -1)
+gPos = gSc >= 1
+gNeg = gSc <= -1
+
+trnd = adxD < adxThr ? "RNG" : e8 > e21d ? "UP" : "DN"
+vst  = ivp < 25 ? "CMP" : ivp < 60 ? "NRM" : ivp < 85 ? "ELV" : "STR"
+
+pz   = (cD - e21d) / (cD * atrpD / 100)
+b1   = pz > 0.5 ? 1 : pz < -0.5 ? -1 : 0
+rsR  = ta.roc(cD / spxC, 10)
+b2   = isLC ? 0 : rsR > 0 ? 1 : rsR < 0 ? -1 : 0
+b3   = hygD > 0 ? 1 : -1
+bcf  = b2 + b3 > 0 ? 1 : b2 + b3 < 0 ? -1 : 0
+bias = math.max(-2, math.min(2, b1 + bcf))
+
+surfV = vvixZ > 2 or ratF > 1.08 ? "UNSTABLE" :
+     ratF > 1.0 ? "FRONT RICH" :
+     skewZ > 1.0 and ivp > 50 ? "RICH SKEW" :
+     ratB < 0.90 and ivp < 35 ? "CHEAP FWD" :
+     ivp > 60 ? "RICH IV" : "FLAT"
+
+// ------------------------------------------------------------------- GATES ---
+fomcD   = f_fomcDte(nowT)
+// v2.4 (P4): pin the OpEx anchor to NOON New York — kills timestamp()
+// timezone ambiguity (same hardening class as the v2.3 FOMC fix).
+opexDow = dayofweek(timestamp("America/New_York", year, month, 1, 12, 0))
+opexDay = 1 + ((6 - opexDow + 7) % 7) + 14
+postOpx = dayofmonth > opexDay and dayofmonth <= opexDay + 5
+opexWk  = dayofmonth >= opexDay - 4 and dayofmonth <= opexDay
+qtrMo   = month == 3 or month == 6 or month == 9 or month == 12
+exDiv   = isETF and qtrMo and dayofmonth >= opexDay - 5 and dayofmonth <= opexDay
+
+gateV = math.abs(vixChg) > vixSpk
+gateG = gNeg and (vst == "ELV" or vst == "STR")
+gateF = fomcD <= fEnd
+gateK = kinkZ > 1.5 and not gateF
+// v2.6 (T2): graduate STR. Stressed-but-RICH days (VRP > +2 with realized
+// falling) are the best-paid selling days — 14 of 42 STR days in the
+// Nov'25-Jul'26 backtest. Those trade at QUARTER size; the rest stay hard.
+strGrad = vst == "STR" and vrp > 2 and rvFall
+hardG   = gateV or gateG or (vst == "STR" and not strGrad)
+
+// Plain-English warnings line
+warn = ""
+warn += gateF ? "FOMC in " + str.tostring(fomcD) + "d (inside front leg). " : ""
+warn += gateK ? "Event premium loading the front of the curve. " : ""
+warn += postOpx ? "Post-OpEx week — vol expansion window. " : ""
+warn += gateV ? "Vol index moved " + str.tostring(vixChg, "#.0") + "% today — surface unsettled. " : ""
+warn += exDiv ? "ETF ex-div this week — no short ITM calls. " : ""
+warn += gateG ? "Unstable tape + elevated vol. " : ""
+warnTxt = warn == "" ? "None" : warn
+
+// ---------------------------------------------------------------- STRATEGY ---
+strat = "SKIP"
+why   = ""
+altS  = "—"
+if hardG
+    strat := "NO NEW TRADES"
+    why   := vst == "STR" ? "Vol is stressed — premium selling risk outweighs edge." :
+         gateV ? "VIX spiked today — let the surface settle one session." :
+         "Tape is unstable while vol is elevated — stand down."
+else if gNeg
+    strat := "PUT BWB — HALF SIZE"
+    why   := "Tape proxy says moves are being amplified, not faded. Defined-risk only, reduced size."
+    altS  := "skip entirely"
+else if strGrad
+    strat := "PUT BWB — QUARTER SIZE"
+    why   := "Vol is STRESSED but RICH: VRP +" + str.tostring(vrp, "#.0") + "v with realized falling — the best-paid selling days. Defined-risk only, quarter size."
+    altS  := "stand aside"
+else if vrp <= 0
+    // v2.4 (P0): selling is unpaid, but that is a SIDE decision, not a stop.
+    // In contango the ranker doctrine is: buy the cheap back leg (debit time
+    // spread) at reduced size. Only stand aside when the curve offers nothing.
+    canCal = ratB < 0.97 or surfV == "CHEAP FWD"
+    strat := canCal ? "DEBIT CALENDAR — HALF SIZE" : "NO PREMIUM SELLING"
+    why   := "Realized vol is running ABOVE implied — sellers are underpaid right now." + (canCal ? " Contango: buy the cheap back leg instead (debit, not credit)." : "")
+    altS  := canCal ? "double calendar" : "stand aside"
+else if opexWk and trnd == "RNG" and gPos
+    strat := "PIN BUTTERFLY (OpEx)"
+    why   := "OpEx week + stabilizing tape + range: price tends to pin. Fly at spot."
+    altS  := "iron condor"
+else if vst == "ELV"
+    strat := "PUT BWB"
+    why   := "IV elevated" + (skewZ > 1 ? " and put skew rich — wings financed cheap" : "") + ". Vol crush works for you."
+    altS  := "iron condor if rangebound"
+else if vst == "NRM" and trnd == "RNG"
+    strat := "IRON CONDOR"
+    why   := "Normal vol, rangebound, options overpriced by " + str.tostring(vrp, "#.0") + " vol pts — classic condor day."
+    altS  := "OTM butterfly"
+else if vst == "NRM" and (trnd == "UP" or trnd == "DN")
+    strat := "DIAGONAL " + (trnd == "UP" ? "(CALL side)" : "(PUT side)")
+    why   := "Normal vol + " + (trnd == "UP" ? "uptrend" : "downtrend") + " — the missing matrix cell (v2.6/T1): trend-side diagonal, front theta decays with the move."
+    altS  := "calendar (no direction)"
+else if vst == "CMP" and trnd == "RNG" and (surfV == "CHEAP FWD" or surfV == "FLAT")
+    strat := "CALENDAR"
+    why   := "Calm + range: back-month vega is cheap, front theta decays faster — buy time cheap."
+    altS  := "double calendar"
+else if vst == "CMP" and (trnd == "UP" or trnd == "DN")
+    strat := "DIAGONAL " + (trnd == "UP" ? "(CALL side)" : "(PUT side)")
+    why   := "Calm vol + " + (trnd == "UP" ? "uptrend" : "downtrend") + ": cheap vega plus directional theta."
+    altS  := "calendar (no direction)"
+else if surfV == "FRONT RICH"
+    strat := "CALENDAR — SELL RICH FRONT"
+    why   := "Front of the curve is INVERTED (short-dated IV above 30d) — sell the expensive front leg."
+    altS  := "skip if VVIX rising"
+else
+    strat := "MARGINAL — SKIPPING IS FINE"
+    why   := "No clear edge today. Capital preserved is edge too."
+if gateF and not hardG and not str.contains(strat, "NO ")
+    strat += " *FOMC"
+    why   += " FOMC in " + str.tostring(fomcD) + "d: only sell a front leg that contains it if that front is visibly rich."
+
+// ----------------------------------------------------------- EXPIRY ENGINE ---
+f_w(dte) =>
+    t   = dte / 365.0
+    t9  = 9 / 365.0
+    t30 = 30 / 365.0
+    t91 = 91 / 365.0
+    w9  = v9d * v9d * t9
+    w30 = vix * vix * t30
+    w91 = v3m * v3m * t91
+    dte <= 9 ? v9d * v9d * t :
+     dte <= 30 ? w9 + (w30 - w9) * (t - t9) / (t30 - t9) :
+     dte <= 91 ? w30 + (w91 - w30) * (t - t30) / (t91 - t30) :
+     v3m * v3m * t
+f_iv(dte) => math.sqrt(f_w(dte) / (dte / 365.0)) * scale
+f_fwd(d1, d2) =>
+    dv = (f_w(d2) - f_w(d1)) / ((d2 - d1) / 365.0)
+    dv > 0 ? math.sqrt(dv) * scale : float(na)
+f_dateStr(ts) => str.format("{0,date,EEE MMM d}", ts)
+f_dteDate(dte) => str.format("{0,date,MMM d}", nowT + dte * MS_DAY)
+
+var string expTxt = ""
+var string expDet = ""
+if barstate.islast
+    fri = array.new_int()
+    for i = 1 to 50
+        if dayofweek(nowT + i * MS_DAY) == dayofweek.friday
+            array.push(fri, i)
+    isCal = str.contains(strat, "CALENDAR") or str.contains(strat, "DIAGONAL")
+    if str.contains(strat, "NO ") or str.contains(strat, "SKIP")
+        expTxt := "—"
+        expDet := "Manage existing positions only today."
+    else if str.contains(strat, "PIN")
+        oD = opexDay - dayofmonth
+        expTxt := f_dteDate(oD) + " (" + str.tostring(oD) + "d, OpEx)"
+        expDet := "Body at spot. Expires this OpEx Friday."
+    else if isCal
+        bestE = -99.0
+        bF = 0
+        bB = 0
+        for i = 0 to array.size(fri) - 1
+            fd = array.get(fri, i)
+            if fd >= fEnt and fd <= fEnd    // v2.6 (T3): 12-21d fronts; short fronts get an earlier exit note
+                for j = 0 to array.size(fri) - 1
+                    bd = array.get(fri, j)
+                    if bd >= bEnt and bd <= bEnd and bd - fd >= 7
+                        // v2.6 (T3): FOMC between the legs is a WARNING below,
+                        // no longer an exclusion — halving availability into
+                        // every FOMC was the second-biggest signal killer.
+                        e = f_iv(fd) - f_fwd(fd, bd)
+                        if not na(e) and e > bestE
+                            bestE := e
+                            bF := fd
+                            bB := bd
+        if bF > 0
+            expTxt := "Sell " + f_dteDate(bF) + " / Buy " + f_dteDate(bB)
+            expDet := "Front " + str.tostring(bF) + "d, back " + str.tostring(bB) + "d. Curve edge " + (bestE >= 0 ? "+" : "") + str.tostring(bestE, "#.0") + " vol pts." + (fomcD <= bF ? " FOMC sits in the front leg." : fomcD > bF and fomcD <= bB ? " FOMC sits BETWEEN the legs — you hold long back vega through the print." : "") + (bF - holdMax < 7 ? " Short front: exit by day " + str.tostring(bF - 7) + "." : "") + (bestE < 0.5 ? " THIN — confirm on the real chain before trading." : " Confirm on chain.")
+        else
+            expTxt := "NO VALID PAIR"
+            expDet := "No Friday pair passes DTE + event rules today."
+            // v2.5 (P0-b): a calendar/diagonal STRATEGY with no valid pair is
+            // self-contradictory — ACT and EXPIRY must never disagree. Confirmed
+            // live: Jul 1 SPX showed "DEBIT CALENDAR — HALF SIZE" over
+            // "NO VALID PAIR". Downgrade here, before VERDICT is computed below.
+            if str.contains(strat, "DEBIT CALENDAR")
+                strat := "NO PREMIUM SELLING"
+                why   := "Realized vol is running ABOVE implied, and no calendar pair clears the curve-edge/DTE/event filters today either — nothing to buy or sell. Stand aside."
+                altS  := "stand aside"
+            else
+                strat := "MARGINAL — SKIPPING IS FINE"
+                why   := "Curve favored a calendar/diagonal, but no Friday pair cleared DTE + event filters today."
+                altS  := "—"
+    else
+        bSE = 0
+        bGap = 99
+        for i = 0 to array.size(fri) - 1
+            d = array.get(fri, i)
+            if d >= 21 and d <= 38 and d - holdMax >= 7 and fomcD != d and math.abs(d - 30) < bGap
+                bSE := d
+                bGap := math.abs(d - 30)
+        if bSE > 0
+            expTxt := f_dteDate(bSE) + " (" + str.tostring(bSE) + "d)"
+            expDet := str.tostring(bSE - holdMax) + "d will remain at your latest exit." + (fomcD < bSE ? " Position spans FOMC (d-" + str.tostring(fomcD) + ")." : "")
+        else
+            expTxt := "21–35d Friday (manual)"
+            expDet := "No Friday fits all rules — pick by hand."
+
+// ------------------------------------------------------------------ VERDICT ---
+standAside = hardG or str.contains(strat, "NO ") or str.contains(strat, "SKIPPING")
+caution    = not standAside and (gNeg or vst == "ELV" or vst == "STR" or gateF or vrp <= 0 or str.contains(strat, "HALF") or str.contains(strat, "QUARTER"))
+verdict    = standAside ? "STAND ASIDE" : caution ? "TRADE — CAUTION" : "TRADE"
+verdDet    = standAside ? "No new risk today. Manage what you hold." :
+     caution ? "Edge exists but conditions imperfect — reduce size, defined risk only." :
+     "Conditions support a new position at full plan size."
+sizeTxt    = standAside ? "—" : str.contains(strat, "QUARTER") ? "QUARTER SIZE" : caution ? "HALF SIZE" : "FULL SIZE"
+
+// Plain-language WHY values
+mktTxt  = (vst == "CMP" ? "Calm vol" : vst == "NRM" ? "Normal vol" : vst == "ELV" ? "Elevated vol" : "STRESSED vol") + " · " + (trnd == "RNG" ? "rangebound" : trnd == "UP" ? "uptrend" : "downtrend")
+premTxt = vrp > 0 ? "Overpriced +" + str.tostring(vrp, "#.0") + "v — selling pays" : "Underpriced " + str.tostring(vrp, "#.0") + "v — selling does NOT pay"
+curvTxt = ratF > 1.0 ? "Front INVERTED — front legs rich" : kinkZ > 1.5 ? "Event kink in front" : ratB < 0.90 ? "Steep contango — back vega cheap" : ratB < 0.97 ? "Normal contango" : "Flat curve"
+stabTxt = gPos ? "Stabilizing — moves get faded" : gNeg ? "UNSTABLE — moves get amplified" : "Mixed"
+dirTxt  = bias > 0 ? "Leaning UP (+" + str.tostring(bias) + ")" : bias < 0 ? "Leaning DOWN (" + str.tostring(bias) + ")" : "Neutral (0)"
+
+// ---------------------------------------------------------------- TEXT WRAP ---
+f_wrap(s, w) =>
+    if str.length(s) <= w
+        s
+    else
+        parts = str.split(s, " ")
+        out = ""
+        line = ""
+        for i = 0 to array.size(parts) - 1
+            word = array.get(parts, i)
+            if str.length(line) == 0
+                line := word
+            else if str.length(line) + 1 + str.length(word) <= w
+                line := line + " " + word
+            else
+                out := out + (str.length(out) > 0 ? "\n" : "") + line
+                line := word
+        out + (str.length(out) > 0 ? "\n" : "") + line
+
+// -------------------------------------------------------------------- TABLE ---
+tblPos = posIn == "Top right" ? position.top_right : position.bottom_right
+var table T = table.new(tblPos, 2, 13, frame_color=color.gray,
+     frame_width=1, border_width=1, border_color=color.new(color.gray, 70))
+cH   = color.new(#1e222d, 0)
+cSec = color.new(#0c2a3d, 0)
+cN   = color.new(#131722, 10)
+cLbl = color.new(#2a2e39, 0)
+tw   = color.white
+tg   = color.new(color.silver, 0)
+cGrn = color.new(color.green, 15)
+cRed = color.new(color.red, 15)
+cAmb = color.new(color.orange, 15)
+cGry = color.new(color.gray, 45)
+szA  = txtBig ? size.normal : size.small
+szB  = txtBig ? size.small  : size.tiny
+
+f_actRow(r, lbl, val, vc, tip) =>
+    table.cell(T, 0, r, lbl, text_color=tw, bgcolor=cLbl, text_size=szA, text_halign=text.align_left)
+    table.cell(T, 1, r, val, text_color=tw, bgcolor=vc,  text_size=szA, text_halign=text.align_left, tooltip=tip)
+
+f_whyRow(r, lbl, val, vc, tip) =>
+    table.cell(T, 0, r, lbl, text_color=tg, bgcolor=cN, text_size=szB, text_halign=text.align_left)
+    table.cell(T, 1, r, val, text_color=tw, bgcolor=vc, text_size=szB, text_halign=text.align_left, tooltip=tip)
+
+if barstate.islast
+    vCol = standAside ? cRed : caution ? cAmb : cGrn
+    table.cell(T, 0, 0, "TE CONSOLE · " + tk, text_color=tw, bgcolor=cH, text_size=szA, text_halign=text.align_left)
+    table.cell(T, 1, 0, "Data: " + f_dateStr(dT) + " close", text_color=tg, bgcolor=cH, text_size=szB, text_halign=text.align_left,
+         tooltip="Date of the daily bar these numbers come from — also the anchor for FOMC countdown and expiry dates (replay-aware). Updates live during the US session; after the bell this is today's completed close. " + surfTxt + " · " + wrapTxt)
+
+    table.cell(T, 0, 1, "—— ACT ——", text_color=tw, bgcolor=cSec, text_size=szB)
+    table.cell(T, 1, 1, "", bgcolor=cSec)
+    f_actRow(2, "VERDICT",  verdict, vCol, verdDet)
+    f_actRow(3, "STRATEGY", f_wrap(strat, 22),   standAside ? cGry : cGrn, why + (altS == "—" ? "" : "  |  Alternative: " + altS))
+    f_actRow(4, "EXPIRY",   f_wrap(expTxt, 22),  expTxt == "—" or str.contains(expTxt, "NO ") ? cGry : cN, expDet)
+    f_actRow(5, "SIZE",     sizeTxt, vCol, "Exit day 5–" + str.tostring(holdMax) + ". Roll/close any front leg before it reaches 7 DTE. Execute 15:00–15:40 ET, start at mid, max 3 reprices.")
+
+    table.cell(T, 0, 6, "—— WHY ——", text_color=tw, bgcolor=cSec, text_size=szB)
+    table.cell(T, 1, 6, "", bgcolor=cSec)
+    f_whyRow(7,  "Market",     mktTxt,  vst == "STR" ? cRed : vst == "ELV" ? cAmb : cN, "IV percentile " + str.tostring(ivp, "#") + "% (1y) · ADX " + str.tostring(adxD, "#") + " · " + tk + " vol index " + str.tostring(volIdx, "#.0") + " (Δ " + (vixChg >= 0 ? "+" : "") + str.tostring(vixChg, "#.0") + "% today) · VVIX z " + str.tostring(vvixZ, "#.0"))
+    f_whyRow(8,  "Premium",    premTxt, vrp > 0 ? cGrn : cRed, "Implied " + str.tostring(volIdx, "#.0") + " vs 21-day realized " + str.tostring(rv21, "#.0") + " (sample basis, matches engine). Short-term realized is " + (rvFall ? "FALLING (good for sellers)" : "RISING (caution)") + ". VRP z " + str.tostring(vrpZ, "#.0"))
+    f_whyRow(9,  "Vol curve",  curvTxt, str.contains(curvTxt, "INVERT") ? cRed : cN, "9d/30d ratio " + str.tostring(ratF, "#.00") + " · 30d/91d " + str.tostring(ratB, "#.00") + " · front-kink z " + str.tostring(kinkZ, "#.0") + ". Skew z " + str.tostring(skewZ, "#.0") + (isLC ? "" : " (SPX-derived proxy)"))
+    f_whyRow(10, "Stability*", stabTxt, gPos ? cGrn : gNeg ? cRed : cGry, "Behavioral PROXY for dealer gamma, not real positioning data. Return autocorr " + str.tostring(ac20, "#.00") + " · close-to-close/range vol " + str.tostring(rr, "#.00") + " · score " + str.tostring(gSc) + " of ±4. Distrust this row first if the tape disagrees.")
+    f_whyRow(11, "Direction",  dirTxt,  bias > 0 ? cGrn : bias < 0 ? cRed : cGry, "Price vs 21d EMA (in ATRs): " + str.tostring(pz, "#.0") + (isLC ? "" : " · rel. strength vs SPX " + (rsR > 0 ? "positive" : "negative")) + " · credit (HYG) " + (b3 > 0 ? "supportive" : "weak"))
+    f_whyRow(12, "Warnings",   f_wrap(warnTxt, 34), warn == "" ? cGrn : cAmb, "FOMC dates embedded for 2026; CPI-type events detected from curve kink only. OpEx phase computed from calendar.")
+
+// -------------------------------------------------------- CHART OVERLAYS ---
+ema21c = ta.ema(close, 21)
+plot(showEMA ? ema21c : na, "EMA21", color=color.new(color.orange, 0), linewidth=2)
+emPct = rv21 / 100 * math.sqrt(holdMax / 252.0)
+plot(showEM ? cD * (1 + emPct) : na, "EM+", color=color.new(color.gray, 60), style=plot.style_circles)
+plot(showEM ? cD * (1 - emPct) : na, "EM−", color=color.new(color.gray, 60), style=plot.style_circles)
+ribCol = vst == "STR" or gNeg ? color.new(color.red, 20) : vst == "ELV" ? color.new(color.orange, 20) : vst == "CMP" ? color.new(color.teal, 20) : color.new(color.green, 20)
+plotshape(showRib, "Regime ribbon", style=shape.square, location=location.bottom, color=ribCol, size=size.tiny)
