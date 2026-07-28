@@ -273,7 +273,17 @@ management/  deterministic campaign action engine
 validation/  manual evidence and captured-context replay summaries
 static/      TE browser UI + Campaign v3 testing UI
 tests/       mock-mode suite: python -m pytest tests/
+tradingview/ Pine v6 FVS Console companion, archive and parity fixture
 ```
+
+## TradingView companion
+
+`tradingview/fvs_console_v3.pine` mirrors the app's high-level Gate 1,
+HAR-lite forward VRP, Gate 2 family language and Monday/Friday doctrine. It is
+an orientation dashboard, not a second option-chain engine. The app remains
+authoritative for exact chain data, macro events, liquidity, account gates,
+sizing, portfolio fit and TimeEdge/TimeZone eligibility. The previous v2.6
+console is preserved under `tradingview/archive/`.
 
 ## Direction tab (`/api/direction`)
 Objective structure selection for a stated intent — any ticker, three data
