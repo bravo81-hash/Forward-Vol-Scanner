@@ -1,5 +1,51 @@
 # TE Playbook + Campaign Engine v3
 
+## Value Entry Put Scanner
+
+Open `/value-puts` for the valuation-first stock-acquisition module. It keeps
+cash-secured acquisition, margin-efficient acquisition and defined-risk put
+spreads as distinct modes. The ranking is deliberately based on business
+quality, a valuation range, net share basis, genuine cash or defined-risk
+yield, volatility richness, liquidity and downside stress—not premium divided
+by the broker's current buying-power requirement.
+
+The page starts with automated **Universe Discovery**. It screens the
+maintained liquid US single-stock universe without ticker input, applies
+sector-aware quality and valuation gates, ranks the survivors, and loads up to
+25 companies into the option scan. Option chains are deliberately deferred
+until Stage 2 instead of being requested for the whole universe.
+
+The option stage accepts the discovered shortlist (or an edited watchlist),
+portfolio NLV, available cash, sector cap, DTE window, yield hurdle and
+reviewed per-company buy-price overrides. Each result shows:
+
+* bear/base/bull valuation and the conservative acquisition price;
+* exact expiry, strike, executable credit and net basis;
+* cash-secured and annualised return, with leveraged BP return secondary;
+* IV, delta, VRP proxy, skew, spread, volume and open interest;
+* −15%, −25%, −40% and −60% stock shocks;
+* assignment-based maximum contracts and the binding portfolio limit; and
+* a transparent 100-point component score with every hard rejection reason.
+
+Practice mode is deterministic. Yahoo mode uses delayed fundamentals, daily
+history and a bounded sample of listed option expiries. Free data can be
+missing or stale, so a shortlisted row still requires thesis review. The
+**Validate exact contract with TWS** action refreshes only that finalist and
+requests account what-if margin. It does not stage or transmit an order.
+
+The automated value is a range and confidence score, not an objective fair
+price. A user-reviewed acquisition-price override is authoritative and is
+shown as such. Sizing assumes full assignment; high nominal return on current
+IBKR buying power never increases the approved quantity.
+
+Quick test:
+
+```powershell
+python -m pytest tests/test_value_put.py -q
+python webapp.py
+# http://127.0.0.1:8765/value-puts
+```
+
 ## Price-Action Pattern Scanner
 
 Open `/patterns` for the distinct chart-pattern module inside this application.
