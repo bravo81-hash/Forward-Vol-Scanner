@@ -8,10 +8,11 @@
     :root{--bg:#07111f;--panel:#0d1929;--panel2:#111f31;--line:#22344a;--text:#ecf2f8;--muted:#91a2b7;--cyan:#48d5c8;--blue:#69a7ff;--green:#5ee39b;--amber:#f5bd62;--red:#ff7784;--shadow:0 16px 48px #0006}
     *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 75% -10%,#133459 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
     button,input,select{font:inherit}.shell{max-width:1580px;margin:auto;padding:18px 22px 60px}.top{display:flex;align-items:center;gap:18px;margin-bottom:16px}.brand{font-size:12px;letter-spacing:.14em;color:var(--cyan);font-weight:800}.top h1{font-size:22px;margin:2px 0}.top p{margin:0;color:var(--muted)}.nav{margin-left:auto;display:flex;gap:8px}.nav a{color:var(--muted);text-decoration:none;padding:8px 10px;border:1px solid var(--line);border-radius:9px}.nav a:hover{color:var(--text);border-color:#45607d}
-    .panel{background:linear-gradient(160deg,#101f32e8,#0b1726e8);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow)}.controls{padding:15px;display:grid;grid-template-columns:2.2fr repeat(5,minmax(105px,1fr));gap:11px;align-items:end}.field label{display:block;color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}.field input,.field select{width:100%;background:#071321;border:1px solid #2a4059;color:var(--text);border-radius:8px;padding:9px 10px;outline:none}.field input:focus,.field select:focus{border-color:var(--cyan)}.span2{grid-column:span 2}.modebar{display:flex;gap:6px;background:#071321;padding:4px;border-radius:10px}.modebar button{flex:1;border:0;color:var(--muted);background:transparent;border-radius:7px;padding:8px;cursor:pointer}.modebar button.active{background:#19334b;color:var(--text);box-shadow:inset 0 0 0 1px #31536c}.run{border:0;background:linear-gradient(120deg,var(--cyan),#54a9ff);color:#04111c;font-weight:850;border-radius:9px;padding:10px 16px;cursor:pointer}.run:disabled{filter:grayscale(1);opacity:.65}.hint{grid-column:1/-1;display:flex;gap:18px;color:var(--muted);font-size:12px}.hint b{color:var(--text)}
+    .panel{background:linear-gradient(160deg,#101f32e8,#0b1726e8);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow)}.controls{padding:15px;display:grid;grid-template-columns:2.2fr repeat(5,minmax(105px,1fr));gap:11px;align-items:end}.field label{display:block;color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}.field input,.field select{width:100%;background:#071321;border:1px solid #2a4059;color:var(--text);border-radius:8px;padding:9px 10px;outline:none}.field input:focus,.field select:focus{border-color:var(--cyan)}.span2{grid-column:span 2}.modebar{display:flex;gap:6px;background:#071321;padding:4px;border-radius:10px}.modebar button{flex:1;border:0;color:var(--muted);background:transparent;border-radius:7px;padding:8px;cursor:pointer}.modebar button.active{background:#19334b;color:var(--text);box-shadow:inset 0 0 0 1px #31536c}.run{border:0;background:linear-gradient(120deg,var(--cyan),#54a9ff);color:#04111c;font-weight:850;border-radius:9px;padding:10px 16px;cursor:pointer}.run.secondary{background:#17314a;color:var(--text);border:1px solid #31536c}.run:disabled{filter:grayscale(1);opacity:.65}.hint{grid-column:1/-1;display:flex;gap:18px;color:var(--muted);font-size:12px}.hint b{color:var(--text)}
+    .stagehead{grid-column:1/-1;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid var(--line);padding-bottom:10px}.stagehead h2{font-size:15px;margin:0}.stagehead p{color:var(--muted);margin:2px 0 0;font-size:12px}.step{color:var(--cyan);font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase}.discovery{margin-bottom:14px}.discovery-controls{padding:15px;display:grid;grid-template-columns:1.4fr repeat(6,minmax(105px,1fr));gap:11px;align-items:end}.discovery-output{border-top:1px solid var(--line)}.discovery-summary{display:flex;gap:18px;flex-wrap:wrap;padding:11px 15px;color:var(--muted)}.discovery-summary b{color:var(--text)}.discovery-table{max-height:390px;overflow:auto}.discovery-table table{width:100%;border-collapse:collapse;min-width:980px}.discovery-table th{position:sticky;top:0;background:#0d1b2c;color:#8fa2b8;text-transform:uppercase;letter-spacing:.055em;font-size:10px;text-align:left;padding:10px;border-bottom:1px solid var(--line)}.discovery-table td{padding:9px 10px;border-bottom:1px solid #1b2d42}.discovery-actions{display:flex;gap:8px;padding:11px 15px;border-top:1px solid var(--line);align-items:center}.discovery-actions .sub{margin-left:auto}
     .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}.metric{padding:13px 15px}.metric span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.metric strong{display:block;font-size:22px;margin-top:2px}.metric small{color:var(--muted)}
-    .notice{padding:10px 14px;margin-bottom:12px;color:var(--muted);display:flex;gap:8px}.notice b{color:var(--amber)}.tablewrap{overflow:auto;border-radius:15px}.results{width:100%;border-collapse:collapse;min-width:1120px}.results th{position:sticky;top:0;background:#0d1b2c;color:#8fa2b8;text-transform:uppercase;letter-spacing:.055em;font-size:10px;text-align:left;padding:11px;border-bottom:1px solid var(--line)}.results td{padding:11px;border-bottom:1px solid #1b2d42;vertical-align:middle}.results tr.main{cursor:pointer}.results tr.main:hover{background:#13243a}.ticker{font-size:15px;font-weight:850}.sub{color:var(--muted);font-size:11px}.pill{display:inline-block;padding:4px 8px;border-radius:99px;font-size:10px;font-weight:850;letter-spacing:.05em}.QUALIFIED{color:var(--green);background:#153b31}.WATCH{color:var(--blue);background:#173455}.SPECULATIVE{color:var(--amber);background:#3d3018}.REJECTED{color:var(--red);background:#401e28}.score{font-size:17px;font-weight:850}.money{font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.detailrow{display:none;background:#081521}.detailrow.open{display:table-row}.detail{padding:18px 22px!important}.detailgrid{display:grid;grid-template-columns:1.1fr 1fr 1.35fr;gap:12px}.card{background:#0e1c2c;border:1px solid #20354d;border-radius:12px;padding:13px}.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#b5c5d6;margin:0 0 10px}.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px}.kv span:nth-child(odd){color:var(--muted)}.kv span:nth-child(even){font-variant-numeric:tabular-nums}.range{height:8px;background:#1c3148;border-radius:8px;margin:14px 0 8px;position:relative}.range i{position:absolute;top:-4px;width:3px;height:16px;background:var(--cyan)}.stress{width:100%;border-collapse:collapse}.stress td,.stress th{padding:5px!important;border-bottom:1px solid #1d3045;text-align:right}.stress th:first-child,.stress td:first-child{text-align:left}.bad{color:var(--red)}.good{color:var(--green)}.reasons{margin:8px 0 0;padding-left:17px;color:var(--muted)}.reasons li{margin:4px 0}.error{border-color:#6d2732;color:#ffabb2}.empty{padding:48px;text-align:center;color:var(--muted)}.loader{display:inline-block;width:15px;height:15px;border:2px solid #16425a;border-top-color:var(--cyan);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
-    @media(max-width:1100px){.controls{grid-template-columns:repeat(3,1fr)}.summary{grid-template-columns:repeat(3,1fr)}.detailgrid{grid-template-columns:1fr}.top{align-items:flex-start}.nav{display:none}}@media(max-width:650px){.shell{padding:12px}.controls{grid-template-columns:1fr}.span2{grid-column:span 1}.summary{grid-template-columns:1fr 1fr}.hint{display:block}}
+    .notice{padding:10px 14px;margin-bottom:12px;color:var(--muted);display:flex;gap:8px}.notice b{color:var(--amber)}.tablewrap{overflow:auto;border-radius:15px}.results{width:100%;border-collapse:collapse;min-width:1120px}.results th{position:sticky;top:0;background:#0d1b2c;color:#8fa2b8;text-transform:uppercase;letter-spacing:.055em;font-size:10px;text-align:left;padding:11px;border-bottom:1px solid var(--line)}.results td{padding:11px;border-bottom:1px solid #1b2d42;vertical-align:middle}.results tr.main{cursor:pointer}.results tr.main:hover{background:#13243a}.ticker{font-size:15px;font-weight:850}.sub{color:var(--muted);font-size:11px}.pill{display:inline-block;padding:4px 8px;border-radius:99px;font-size:10px;font-weight:850;letter-spacing:.05em}.QUALIFIED,.ELIGIBLE{color:var(--green);background:#153b31}.WATCH,.REVIEW{color:var(--blue);background:#173455}.SPECULATIVE{color:var(--amber);background:#3d3018}.REJECTED,.EXCLUDED{color:var(--red);background:#401e28}.score{font-size:17px;font-weight:850}.money{font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.detailrow{display:none;background:#081521}.detailrow.open{display:table-row}.detail{padding:18px 22px!important}.detailgrid{display:grid;grid-template-columns:1.1fr 1fr 1.35fr;gap:12px}.card{background:#0e1c2c;border:1px solid #20354d;border-radius:12px;padding:13px}.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#b5c5d6;margin:0 0 10px}.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px}.kv span:nth-child(odd){color:var(--muted)}.kv span:nth-child(even){font-variant-numeric:tabular-nums}.range{height:8px;background:#1c3148;border-radius:8px;margin:14px 0 8px;position:relative}.range i{position:absolute;top:-4px;width:3px;height:16px;background:var(--cyan)}.stress{width:100%;border-collapse:collapse}.stress td,.stress th{padding:5px!important;border-bottom:1px solid #1d3045;text-align:right}.stress th:first-child,.stress td:first-child{text-align:left}.bad{color:var(--red)}.good{color:var(--green)}.reasons{margin:8px 0 0;padding-left:17px;color:var(--muted)}.reasons li{margin:4px 0}.error{border-color:#6d2732;color:#ffabb2}.empty{padding:48px;text-align:center;color:var(--muted)}.loader{display:inline-block;width:15px;height:15px;border:2px solid #16425a;border-top-color:var(--cyan);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:1200px){.discovery-controls{grid-template-columns:repeat(4,1fr)}}@media(max-width:1100px){.controls{grid-template-columns:repeat(3,1fr)}.summary{grid-template-columns:repeat(3,1fr)}.detailgrid{grid-template-columns:1fr}.top{align-items:flex-start}.nav{display:none}}@media(max-width:650px){.shell{padding:12px}.controls,.discovery-controls{grid-template-columns:1fr}.span2{grid-column:span 1}.summary{grid-template-columns:1fr 1fr}.hint{display:block}.discovery-actions{align-items:stretch;flex-direction:column}.discovery-actions .sub{margin-left:0}}
   </style>
 </head>
 <body>
@@ -21,7 +22,24 @@
     <nav class="nav"><a href="/">Trade desk</a><a href="/stocks">Stock radar</a><a href="/patterns">Patterns</a><a href="/research">Research</a></nav>
   </header>
 
+  <section class="panel discovery">
+    <div class="discovery-controls">
+      <div class="stagehead"><div><div class="step">Stage 1 · automated</div><h2>Universe Discovery</h2><p>Screen the maintained liquid US stock universe first. Option chains are only fetched for the resulting shortlist.</p></div></div>
+      <div class="field"><label>Discovery data</label><select id="discoverySource"><option value="yf">Yahoo live/delayed</option><option value="mock">Practice data</option></select></div>
+      <div class="field"><label>Shortlist size</label><input id="discoveryLimit" type="number" value="25" min="1" max="25"></div>
+      <div class="field"><label>Minimum market cap · $B</label><input id="minCap" type="number" value="5" min="0" step="1"></div>
+      <div class="field"><label>Minimum dollar volume · $M</label><input id="minAdv" type="number" value="50" min="0" step="10"></div>
+      <div class="field"><label>Minimum quality</label><input id="minQuality" type="number" value="68" min="0" max="100"></div>
+      <div class="field"><label>Maximum debt / EBITDA</label><input id="maxLeverage" type="number" value="3" min=".1" step=".5"></div>
+      <div class="field"><label>Maximum price / FCF</label><input id="maxPfcf" type="number" value="35" min="1" step="5"></div>
+      <button class="run" id="discover">Discover stocks</button>
+      <div class="hint"><span><b>No ticker list required.</b> Quality, valuation support, acquisition-price reachability, drawdown and liquidity determine the shortlist.</span><span>Financial companies use earnings, book value and ROE rather than debt/EBITDA.</span></div>
+    </div>
+    <div class="discovery-output" id="discoveryOutput"><div class="empty">Run discovery to build a ranked shortlist automatically.</div></div>
+  </section>
+
   <section class="panel controls">
+    <div class="stagehead"><div><div class="step">Stage 2 · option selection</div><h2>Value Entry Put Scan</h2><p>The discovered shortlist is loaded here automatically. You can still edit it before scanning.</p></div></div>
     <div class="field span2"><label>Watchlist · maximum 25</label><input id="symbols" value="AAPL, MSFT, GOOGL, BAC, JPM, XOM, AAL"></div>
     <div class="field"><label>Data source</label><select id="source"><option value="mock">Practice data</option><option value="yf">Yahoo live/delayed</option></select></div>
     <div class="field"><label>Portfolio NLV</label><input id="nlv" type="number" value="100000" min="1"></div>
@@ -105,6 +123,52 @@ function render(data){
   $('table').innerHTML=html;
   window.latestRows=data.rows;
 }
+const compactMoney=n=>{
+  if(n==null)return '—';
+  if(n>=1e12)return '$'+(n/1e12).toFixed(1)+'T';
+  if(n>=1e9)return '$'+(n/1e9).toFixed(1)+'B';
+  if(n>=1e6)return '$'+(n/1e6).toFixed(0)+'M';
+  return money(n);
+};
+function selectedDiscoverySymbols(){
+  return [...document.querySelectorAll('[data-discovery-symbol]:checked')].map(x=>x.dataset.discoverySymbol);
+}
+function updateDiscoveryCount(){
+  const target=$('discoverySelectedCount');
+  if(target)target.textContent=selectedDiscoverySymbols().length;
+}
+function applyDiscovery(runScan=false){
+  const symbols=selectedDiscoverySymbols();
+  if(!symbols.length){$('discoveryMessage').innerHTML='<span class="bad">Select at least one eligible or review company.</span>';return}
+  $('symbols').value=symbols.join(', ');
+  $('source').value=window.discoveryData.source;
+  $('discoveryMessage').innerHTML=`<span class="good">${symbols.length} companies loaded into Stage 2.</span>`;
+  if(runScan)$('scan').click();
+}
+function renderDiscovery(data){
+  window.discoveryData=data;
+  const s=data.summary;
+  let html=`<div class="discovery-summary"><span><b>${s.companies_scanned}</b> analysed</span><span><b>${s.eligible}</b> eligible</span><span><b>${s.review}</b> review</span><span><b>${s.excluded}</b> excluded</span><span><b>${s.data_errors}</b> data errors</span><span>Shortlist: <b id="discoverySelectedCount">${s.selected}</b>/25</span></div>`;
+  if(data.rows.length){
+    html+=`<div class="discovery-table"><table><thead><tr><th>Use</th><th>Rank</th><th>Status</th><th>Company</th><th>Quality</th><th>Spot / buy price</th><th>Price / FCF</th><th>Debt / EBITDA</th><th>52w drawdown</th><th>Dollar volume</th><th>Discovery score</th><th>Reason</th></tr></thead><tbody>`;
+    data.rows.forEach(r=>{
+      const notes=[...(r.blocks||[]),...(r.cautions||[])];
+      html+=`<tr><td><input type="checkbox" data-discovery-symbol="${esc(r.symbol)}" ${r.selected?'checked':''} ${r.status==='EXCLUDED'?'disabled':''} onchange="updateDiscoveryCount()"></td>
+        <td>${r.rank}</td><td><span class="pill ${r.status}">${r.status}</span></td><td><span class="ticker">${esc(r.symbol)}</span><div class="sub">${esc(r.name)} · ${esc(r.sector)}</div></td>
+        <td>${r.quality.grade} · ${r.quality.score}</td><td>${px(r.spot)}<div class="sub">buy ≤ ${px(r.valuation.acquisition_price)} · gap ${pct(r.acquisition_gap_pct)}</div></td>
+        <td>${r.price_to_fcf==null?'—':Number(r.price_to_fcf).toFixed(1)}</td><td>${r.model==='financial company'?'sector model':r.net_debt_ebitda==null?'verify':Number(r.net_debt_ebitda).toFixed(1)}</td>
+        <td>${pct(r.drawdown_52w_pct)}</td><td>${compactMoney(r.average_dollar_volume)}</td><td class="score">${r.discovery_score}</td><td class="sub">${esc(notes[0]||'All discovery gates passed')}</td></tr>`;
+    });
+    html+='</tbody></table></div>';
+  }
+  html+=`<div class="discovery-actions"><button class="run secondary" id="loadDiscovery">Load selected into Stage 2</button><button class="run" id="scanDiscovery">Run put scan on selected</button><span class="sub" id="discoveryMessage">The shortlist is already loaded; adjust checkboxes if required.</span></div>`;
+  if(data.errors.length)html+=`<div class="notice error">${data.errors.slice(0,8).map(e=>`<b>${esc(e.symbol)}</b> ${esc(e.error)}`).join(' · ')}${data.errors.length>8?' · more data errors omitted':''}</div>`;
+  $('discoveryOutput').innerHTML=html;
+  $('symbols').value=data.selected_symbols.join(', ');
+  $('source').value=data.source;
+  $('loadDiscovery').onclick=()=>applyDiscovery(false);
+  $('scanDiscovery').onclick=()=>applyDiscovery(true);
+}
 async function validateTws(symbol,i){
   const target=$('tws-'+i),candidate=window.latestRows[i].candidate;
   target.innerHTML='<span class="loader"></span>Requesting exact TWS quote and what-if margin…';
@@ -113,6 +177,18 @@ async function validateTws(symbol,i){
     target.innerHTML=`<span class="good">TWS validated</span> · ${px(d.net_credit)} credit · basis ${px(d.net_basis)} · initial margin ${money(d.what_if.initial_margin_change)} · maintenance ${money(d.what_if.maintenance_margin_change)}. No order staged.`;
   }catch(e){target.innerHTML=`<span class="bad">${esc(e.message)}</span>`}
 }
+$('discover').onclick=async()=>{
+  const btn=$('discover');btn.disabled=true;btn.innerHTML='<span class="loader"></span>Discovering';
+  $('discoveryOutput').innerHTML='<div class="empty"><span class="loader"></span>Screening the maintained liquid US universe. Live fundamentals can take several minutes…</div>';
+  const payload={source:$('discoverySource').value,limit:Number($('discoveryLimit').value),
+    min_market_cap:Number($('minCap').value)*1e9,min_average_dollar_volume:Number($('minAdv').value)*1e6,
+    min_quality:Number($('minQuality').value),max_leverage:Number($('maxLeverage').value),
+    max_price_to_fcf:Number($('maxPfcf').value)};
+  try{const res=await fetch('/api/value-puts/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json();if(!res.ok)throw new Error(data.error||'Discovery failed');renderDiscovery(data)}
+  catch(e){$('discoveryOutput').innerHTML=`<div class="empty error">${esc(e.message)}</div>`}
+  finally{btn.disabled=false;btn.textContent='Discover stocks'}
+};
 $('scan').onclick=async()=>{
   const btn=$('scan'); btn.disabled=true;btn.innerHTML='<span class="loader"></span>Scanning';
   $('table').innerHTML='<div class="empty"><span class="loader"></span>Comparing fundamentals, valuation ranges and option chains…</div>';

@@ -91,6 +91,22 @@ def mock_symbol(symbol: str) -> tuple[Company, list[OptionQuote]]:
     return company, quotes
 
 
+def mock_company_snapshot(symbol: str) -> tuple[Company, dict]:
+    """Return deterministic discovery data without any external requests."""
+    company, _ = mock_symbol(symbol)
+    digest = int(hashlib.sha256(company.symbol.encode()).hexdigest()[:8], 16)
+    high_52w = company.spot * (1.12 + (digest % 18) / 100)
+    low_52w = company.spot * (0.62 + (digest % 14) / 100)
+    if company.symbol == "AAL":
+        high_52w, low_52w = 18.40, 10.09
+    return company, {
+        "high_52w": round(high_52w, 2),
+        "low_52w": round(low_52w, 2),
+        "average_dollar_volume": float(80_000_000 + digest % 900_000_000),
+        "exchange": "PRACTICE",
+    }
+
+
 def _number(value, default=None):
     try:
         out = float(value)
@@ -108,7 +124,7 @@ def _realized_vol(history) -> float | None:
     return statistics.stdev(returns) * math.sqrt(252) if len(returns) >= 30 else None
 
 
-def yahoo_symbol(symbol: str, min_dte: int, max_dte: int) -> tuple[Company, list[OptionQuote]]:
+def _yahoo_company_snapshot(symbol: str):
     try:
         import yfinance as yf
     except ImportError as exc:
@@ -155,6 +171,32 @@ def yahoo_symbol(symbol: str, min_dte: int, max_dte: int) -> tuple[Company, list
         company.earnings_date = min(future).date().isoformat() if future else None
     except Exception:
         company.data_warnings.append("earnings date unverified")
+    volumes = history["Volume"].dropna() if "Volume" in history else []
+    average_volume = float(volumes.tail(60).mean()) if len(volumes) else 0.0
+    highs = history["High"].dropna() if "High" in history else []
+    lows = history["Low"].dropna() if "Low" in history else []
+    metadata = {
+        "high_52w": float(highs.max()) if len(highs) else None,
+        "low_52w": float(lows.min()) if len(lows) else None,
+        "average_dollar_volume": average_volume * spot,
+        "exchange": info.get("exchange") or info.get("fullExchangeName"),
+    }
+    return company, metadata, ticker
+
+
+def yahoo_company_snapshot(symbol: str) -> tuple[Company, dict]:
+    """Fetch only stock/fundamental data for universe discovery.
+
+    Option expiries and chains are intentionally deferred until the shortlist
+    reaches the Value Entry Put scan.
+    """
+    company, metadata, _ = _yahoo_company_snapshot(symbol)
+    return company, metadata
+
+
+def yahoo_symbol(symbol: str, min_dte: int, max_dte: int) -> tuple[Company, list[OptionQuote]]:
+    company, _, ticker = _yahoo_company_snapshot(symbol)
+    spot = company.spot
 
     expiries = []
     for raw in ticker.options or []:

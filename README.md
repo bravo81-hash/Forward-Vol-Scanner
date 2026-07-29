@@ -9,9 +9,15 @@ quality, a valuation range, net share basis, genuine cash or defined-risk
 yield, volatility richness, liquidity and downside stress—not premium divided
 by the broker's current buying-power requirement.
 
-The screen accepts a watchlist, portfolio NLV, available cash, sector cap, DTE
-window, yield hurdle and reviewed per-company buy-price overrides. Each result
-shows:
+The page starts with automated **Universe Discovery**. It screens the
+maintained liquid US single-stock universe without ticker input, applies
+sector-aware quality and valuation gates, ranks the survivors, and loads up to
+25 companies into the option scan. Option chains are deliberately deferred
+until Stage 2 instead of being requested for the whole universe.
+
+The option stage accepts the discovered shortlist (or an edited watchlist),
+portfolio NLV, available cash, sector cap, DTE window, yield hurdle and
+reviewed per-company buy-price overrides. Each result shows:
 
 * bear/base/bull valuation and the conservative acquisition price;
 * exact expiry, strike, executable credit and net basis;

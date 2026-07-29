@@ -75,6 +75,54 @@ def test_value_put_web_page_and_api():
     assert payload["score_weights"]["valuation_margin"] == 25
 
 
+def test_automated_universe_discovery_ranks_and_selects_without_tickers():
+    from value_put.discovery import discover_value_universe
+
+    result = discover_value_universe(source="mock", limit=12)
+    rows = {row["symbol"]: row for row in result["rows"]}
+    assert result["policy_id"] == "value-universe-discovery-v1"
+    assert result["universe_size"] > 25
+    assert 1 <= len(result["selected_symbols"]) <= 12
+    assert "BAC" in rows and rows["BAC"]["model"] == "financial company"
+    assert rows["AAL"]["status"] == "EXCLUDED"
+    assert all(
+        rows[symbol]["status"] in {"ELIGIBLE", "REVIEW"}
+        for symbol in result["selected_symbols"]
+    )
+
+
+def test_discovery_api_and_page_are_available():
+    import webapp
+
+    client = webapp.app.test_client()
+    page = client.get("/value-puts/")
+    assert b"Universe Discovery" in page.data
+    response = client.post("/api/value-puts/discover", json={
+        "source": "mock",
+        "limit": 10,
+        "min_market_cap": 5_000_000_000,
+        "min_average_dollar_volume": 50_000_000,
+        "min_quality": 68,
+        "max_leverage": 3,
+        "max_price_to_fcf": 35,
+    })
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["summary"]["selected"] <= 10
+    assert payload["selected_symbols"]
+
+
+def test_discovery_api_validates_policy_inputs():
+    import webapp
+
+    client = webapp.app.test_client()
+    response = client.post("/api/value-puts/discover", json={
+        "source": "mock", "limit": 26,
+    })
+    assert response.status_code == 400
+    assert "limit" in response.get_json()["error"]
+
+
 def test_value_put_api_validates_inputs():
     import webapp
 

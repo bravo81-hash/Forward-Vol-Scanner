@@ -184,6 +184,32 @@ def value_put_scanner_page():
     return send_from_directory("static", "value_puts.html")
 
 
+@app.post("/api/value-puts/discover")
+def api_value_put_discover():
+    """Rank the maintained stock universe before requesting option chains."""
+    from value_put.discovery import discover_value_universe
+
+    data = request.get_json(silent=True) or {}
+    try:
+        result = discover_value_universe(
+            source=str(data.get("source") or "mock").lower(),
+            limit=int(data.get("limit", 25)),
+            min_market_cap=float(data.get("min_market_cap", 5_000_000_000)),
+            min_average_dollar_volume=float(
+                data.get("min_average_dollar_volume", 50_000_000)
+            ),
+            min_quality=float(data.get("min_quality", 68)),
+            max_leverage=float(data.get("max_leverage", 3.0)),
+            max_price_to_fcf=float(data.get("max_price_to_fcf", 35.0)),
+        )
+        return jsonify(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("value-entry universe discovery failed")
+        return jsonify({"error": str(exc)}), 502
+
+
 @app.post("/api/value-puts/scan")
 def api_value_put_scan():
     """Valuation-first put scan; broker buying power is never treated as risk."""
