@@ -179,6 +179,63 @@ def pattern_scanner_page():
     return send_from_directory("static", "pattern_scanner.html")
 
 
+@app.get("/value-puts")
+def value_put_scanner_page():
+    return send_from_directory("static", "value_puts.html")
+
+
+@app.post("/api/value-puts/scan")
+def api_value_put_scan():
+    """Valuation-first put scan; broker buying power is never treated as risk."""
+    from value_put.service import scan_value_puts
+
+    data = request.get_json(silent=True) or {}
+    raw_symbols = data.get("symbols")
+    if isinstance(raw_symbols, str):
+        raw_symbols = raw_symbols.split(",")
+    try:
+        result = scan_value_puts(
+            symbols=raw_symbols,
+            source=str(data.get("source") or "mock").lower(),
+            mode=str(data.get("mode") or "cash_secured").lower(),
+            overrides=data.get("overrides") or {},
+            hurdle_rate=float(data.get("hurdle_rate", .08)),
+            nlv=float(data.get("nlv", 100_000)),
+            available_cash=float(data.get("available_cash", 50_000)),
+            sector_limit_pct=float(data.get("sector_limit_pct", .20)),
+            min_dte=int(data.get("min_dte", 45)),
+            max_dte=int(data.get("max_dte", 390)),
+        )
+        return jsonify(result)
+    except (TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("value-entry put scan failed")
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.post("/api/value-puts/validate-tws")
+def api_value_put_validate_tws():
+    """Refresh one exact finalist and obtain what-if margin; never stage it."""
+    from value_put.tws import validate_candidate_tws
+
+    if not _pattern_tws_available():
+        return jsonify({"error":
+                        "TWS validation is unavailable in Codespaces. Run this app on the same computer as TWS."}), 409
+    data = request.get_json(silent=True) or {}
+    symbol = str(data.get("symbol") or "").upper().strip()
+    candidate = data.get("candidate") or {}
+    if not symbol or not candidate.get("expiry") or candidate.get("strike") is None:
+        return jsonify({"error": "symbol, candidate expiry and strike are required"}), 400
+    try:
+        result = with_ib(lambda ib: validate_candidate_tws(
+            ib, symbol, candidate, account=data.get("account")))
+        return jsonify(result)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("value-put TWS validation failed")
+        return jsonify({"error": str(exc)}), 502
+
+
 @app.get("/api/patterns/scan")
 def api_pattern_scan():
     """Synchronous compatibility endpoint; the browser uses background jobs."""

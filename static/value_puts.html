@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Value Entry Put Scanner · FVS</title>
+  <style>
+    :root{--bg:#07111f;--panel:#0d1929;--panel2:#111f31;--line:#22344a;--text:#ecf2f8;--muted:#91a2b7;--cyan:#48d5c8;--blue:#69a7ff;--green:#5ee39b;--amber:#f5bd62;--red:#ff7784;--shadow:0 16px 48px #0006}
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 75% -10%,#133459 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+    button,input,select{font:inherit}.shell{max-width:1580px;margin:auto;padding:18px 22px 60px}.top{display:flex;align-items:center;gap:18px;margin-bottom:16px}.brand{font-size:12px;letter-spacing:.14em;color:var(--cyan);font-weight:800}.top h1{font-size:22px;margin:2px 0}.top p{margin:0;color:var(--muted)}.nav{margin-left:auto;display:flex;gap:8px}.nav a{color:var(--muted);text-decoration:none;padding:8px 10px;border:1px solid var(--line);border-radius:9px}.nav a:hover{color:var(--text);border-color:#45607d}
+    .panel{background:linear-gradient(160deg,#101f32e8,#0b1726e8);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow)}.controls{padding:15px;display:grid;grid-template-columns:2.2fr repeat(5,minmax(105px,1fr));gap:11px;align-items:end}.field label{display:block;color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}.field input,.field select{width:100%;background:#071321;border:1px solid #2a4059;color:var(--text);border-radius:8px;padding:9px 10px;outline:none}.field input:focus,.field select:focus{border-color:var(--cyan)}.span2{grid-column:span 2}.modebar{display:flex;gap:6px;background:#071321;padding:4px;border-radius:10px}.modebar button{flex:1;border:0;color:var(--muted);background:transparent;border-radius:7px;padding:8px;cursor:pointer}.modebar button.active{background:#19334b;color:var(--text);box-shadow:inset 0 0 0 1px #31536c}.run{border:0;background:linear-gradient(120deg,var(--cyan),#54a9ff);color:#04111c;font-weight:850;border-radius:9px;padding:10px 16px;cursor:pointer}.run:disabled{filter:grayscale(1);opacity:.65}.hint{grid-column:1/-1;display:flex;gap:18px;color:var(--muted);font-size:12px}.hint b{color:var(--text)}
+    .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}.metric{padding:13px 15px}.metric span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.metric strong{display:block;font-size:22px;margin-top:2px}.metric small{color:var(--muted)}
+    .notice{padding:10px 14px;margin-bottom:12px;color:var(--muted);display:flex;gap:8px}.notice b{color:var(--amber)}.tablewrap{overflow:auto;border-radius:15px}.results{width:100%;border-collapse:collapse;min-width:1120px}.results th{position:sticky;top:0;background:#0d1b2c;color:#8fa2b8;text-transform:uppercase;letter-spacing:.055em;font-size:10px;text-align:left;padding:11px;border-bottom:1px solid var(--line)}.results td{padding:11px;border-bottom:1px solid #1b2d42;vertical-align:middle}.results tr.main{cursor:pointer}.results tr.main:hover{background:#13243a}.ticker{font-size:15px;font-weight:850}.sub{color:var(--muted);font-size:11px}.pill{display:inline-block;padding:4px 8px;border-radius:99px;font-size:10px;font-weight:850;letter-spacing:.05em}.QUALIFIED{color:var(--green);background:#153b31}.WATCH{color:var(--blue);background:#173455}.SPECULATIVE{color:var(--amber);background:#3d3018}.REJECTED{color:var(--red);background:#401e28}.score{font-size:17px;font-weight:850}.money{font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.detailrow{display:none;background:#081521}.detailrow.open{display:table-row}.detail{padding:18px 22px!important}.detailgrid{display:grid;grid-template-columns:1.1fr 1fr 1.35fr;gap:12px}.card{background:#0e1c2c;border:1px solid #20354d;border-radius:12px;padding:13px}.card h3{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:#b5c5d6;margin:0 0 10px}.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px}.kv span:nth-child(odd){color:var(--muted)}.kv span:nth-child(even){font-variant-numeric:tabular-nums}.range{height:8px;background:#1c3148;border-radius:8px;margin:14px 0 8px;position:relative}.range i{position:absolute;top:-4px;width:3px;height:16px;background:var(--cyan)}.stress{width:100%;border-collapse:collapse}.stress td,.stress th{padding:5px!important;border-bottom:1px solid #1d3045;text-align:right}.stress th:first-child,.stress td:first-child{text-align:left}.bad{color:var(--red)}.good{color:var(--green)}.reasons{margin:8px 0 0;padding-left:17px;color:var(--muted)}.reasons li{margin:4px 0}.error{border-color:#6d2732;color:#ffabb2}.empty{padding:48px;text-align:center;color:var(--muted)}.loader{display:inline-block;width:15px;height:15px;border:2px solid #16425a;border-top-color:var(--cyan);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:1100px){.controls{grid-template-columns:repeat(3,1fr)}.summary{grid-template-columns:repeat(3,1fr)}.detailgrid{grid-template-columns:1fr}.top{align-items:flex-start}.nav{display:none}}@media(max-width:650px){.shell{padding:12px}.controls{grid-template-columns:1fr}.span2{grid-column:span 1}.summary{grid-template-columns:1fr 1fr}.hint{display:block}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div><div class="brand">FVS · ACQUISITION ENGINE</div><h1>Value Entry Put Scanner</h1><p>Acquire quality companies at a reviewed price while being paid to wait.</p></div>
+    <nav class="nav"><a href="/">Trade desk</a><a href="/stocks">Stock radar</a><a href="/patterns">Patterns</a><a href="/research">Research</a></nav>
+  </header>
+
+  <section class="panel controls">
+    <div class="field span2"><label>Watchlist · maximum 25</label><input id="symbols" value="AAPL, MSFT, GOOGL, BAC, JPM, XOM, AAL"></div>
+    <div class="field"><label>Data source</label><select id="source"><option value="mock">Practice data</option><option value="yf">Yahoo live/delayed</option></select></div>
+    <div class="field"><label>Portfolio NLV</label><input id="nlv" type="number" value="100000" min="1"></div>
+    <div class="field"><label>Available cash</label><input id="cash" type="number" value="50000" min="0"></div>
+    <div class="field"><label>Yield hurdle</label><input id="hurdle" type="number" value="8" step=".5" min="0"></div>
+    <div class="field span2"><label>Operating mode</label><div class="modebar"><button data-mode="cash_secured" class="active">Cash-secured</button><button data-mode="margin_efficient">Margin-efficient</button><button data-mode="defined_risk">Defined-risk</button></div></div>
+    <div class="field"><label>DTE range</label><div style="display:flex;gap:6px"><input id="minDte" type="number" value="45"><input id="maxDte" type="number" value="390"></div></div>
+    <div class="field"><label>Sector cap % NLV</label><input id="sectorCap" type="number" value="20" min="0" max="50"></div>
+    <div class="field span2"><label>Reviewed buy-price overrides · optional</label><input id="overrides" placeholder="AAPL=175, MSFT=360"></div>
+    <button class="run" id="scan">Run value scan</button>
+    <div class="hint"><span><b>Qualification:</b> net basis ≤ conservative acquisition price</span><span><b>Sizing:</b> assumes full assignment</span><span><b>Execution:</b> bid + 25% of spread</span></div>
+  </section>
+
+  <section class="summary" id="summary">
+    <div class="panel metric"><span>Qualified</span><strong>—</strong><small>valuation + quality pass</small></div>
+    <div class="panel metric"><span>Watch</span><strong>—</strong><small>close, needs review</small></div>
+    <div class="panel metric"><span>Speculative</span><strong>—</strong><small>quality penalty</small></div>
+    <div class="panel metric"><span>Rejected</span><strong>—</strong><small>hard gate failed</small></div>
+    <div class="panel metric"><span>Assignment capital</span><strong>—</strong><small>all approved sizing</small></div>
+  </section>
+
+  <div class="panel notice"><b>Buying power is not risk capital.</b><span>Return on broker BP is shown only as a leverage diagnostic. Contract limits use assignment exposure, sector capacity and cash.</span></div>
+  <section class="panel tablewrap" id="table"><div class="empty">Run the scanner to compare valuation-supported put entries.</div></section>
+</main>
+<script>
+let mode='cash_secured';
+const $=id=>document.getElementById(id);
+document.querySelectorAll('[data-mode]').forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll('[data-mode]').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active'); mode=btn.dataset.mode;
+});
+const money=n=>n==null?'—':new Intl.NumberFormat('en-AU',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n);
+const px=n=>n==null?'—':'$'+Number(n).toFixed(2);
+const pct=n=>n==null?'—':Number(n).toFixed(1)+'%';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function parseOverrides(text){
+  const out={}; text.split(',').forEach(item=>{const [s,v]=item.split('=').map(x=>x.trim());if(s&&Number(v)>0)out[s.toUpperCase()]=Number(v)});return out;
+}
+function scoreBars(parts){
+  const max={quality:25,valuation:25,yield:15,volatility:15,liquidity:10,stress:10};
+  return Object.entries(parts).map(([k,v])=>`<div style="margin:6px 0"><div class="sub">${esc(k)} <span style="float:right">${v}/${max[k]}</span></div><div class="range"><i style="left:${Math.min(v/max[k]*100,100)}%"></i></div></div>`).join('');
+}
+function reasons(c){
+  const items=[...(c.blocks||[]).map(x=>'Blocked: '+x),...(c.cautions||[]).map(x=>'Caution: '+x)];
+  return items.length?`<ul class="reasons">${items.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<div class="good">No hard gate failed. Complete a company-thesis review before entry.</div>';
+}
+function renderDetail(row,i){
+  const c=row.candidate,v=row.valuation,q=row.quality;
+  if(!c)return `<tr class="detailrow" id="detail-${i}"><td colspan="12" class="detail">No usable options survived the data filters.</td></tr>`;
+  return `<tr class="detailrow" id="detail-${i}"><td colspan="12" class="detail"><div class="detailgrid">
+    <div class="card"><h3>Valuation range · confidence ${v.confidence}%</h3><div class="kv">
+      <span>Bear value</span><span>${px(v.bear)}</span><span>Base value</span><span>${px(v.base)}</span><span>Bull value</span><span>${px(v.bull)}</span>
+      <span>Conservative buy price</span><span class="good">${px(v.acquisition_price)}</span><span>Source</span><span>${esc(v.acquisition_source)}</span>
+      <span>Analyst cross-check</span><span>${px(v.analyst_cross_check)}</span><span>Quality grade</span><span>${q.grade} · ${q.score}/100</span>
+    </div><div class="range"><i style="left:${v.base?Math.min(row.spot/v.base*50,100):50}%"></i></div>
+    <div class="sub">Model methods: ${Object.keys(v.methods).join(', ')||'insufficient data'}. This is a range, not an objective price.</div></div>
+    <div class="card"><h3>Score · ${c.score}/100</h3>${scoreBars(c.components)}${reasons(c)}<button class="run" style="margin-top:12px;width:100%" onclick="event.stopPropagation();validateTws('${esc(row.symbol)}',${i})">Validate exact contract with TWS</button><div class="sub" id="tws-${i}" style="margin-top:8px">Quote + account what-if margin only. No order is staged.</div></div>
+    <div class="card"><h3>Downside stress · per contract</h3><table class="stress"><thead><tr><th>Shock</th><th>Stock</th><th>P/L</th></tr></thead><tbody>${c.stress.map(x=>`<tr><td>−${x.shock}%</td><td>${px(x.stock)}</td><td class="${x.pnl<0?'bad':'good'}">${money(x.pnl)}</td></tr>`).join('')}</tbody></table>
+      <div class="kv" style="margin-top:12px"><span>Max contracts</span><span>${c.sizing.max_contracts}</span><span>Assignment / contract</span><span>${money(c.assignment_capital)}</span><span>Full assignment</span><span>${money(c.sizing.full_assignment_cost)}</span><span>Binding limit</span><span>${esc(c.sizing.binding_limit)}</span></div></div>
+  </div>
+  ${(row.data_warnings||[]).length?`<div class="sub" style="margin-top:10px">Data checks: ${row.data_warnings.map(esc).join(' · ')}</div>`:''}
+  </td></tr>`;
+}
+function render(data){
+  const s=data.summary, cards=$('summary').querySelectorAll('strong');
+  [s.qualified,s.watch,s.speculative,s.rejected,money(s.assignment_capital)].forEach((v,i)=>cards[i].textContent=v);
+  if(!data.rows.length){$('table').innerHTML='<div class="empty">No symbols produced usable results.</div>';return}
+  let html=`<table class="results"><thead><tr><th>Status</th><th>Company</th><th>Quality</th><th>Option</th><th>Credit</th><th>Net basis</th><th>Spot discount</th><th>Cash yield p.a.</th><th>Delta / IV</th><th>Liquidity</th><th>Max qty</th><th>Score</th></tr></thead><tbody>`;
+  data.rows.forEach((r,i)=>{const c=r.candidate;
+    if(!c){html+=`<tr class="main"><td><span class="pill REJECTED">NO DATA</span></td><td><span class="ticker">${esc(r.symbol)}</span><div class="sub">${esc(r.name)}</div></td><td>${r.quality.grade}</td><td colspan="9" class="muted">No usable option candidate</td></tr>${renderDetail(r,i)}`;return}
+    html+=`<tr class="main" onclick="$('detail-${i}').classList.toggle('open')">
+      <td><span class="pill ${c.status}">${c.status}</span></td><td><span class="ticker">${esc(r.symbol)}</span><div class="sub">${esc(r.name)} · ${esc(r.sector)}</div></td>
+      <td>${r.quality.grade} <span class="sub">${r.quality.score}</span></td><td><b>${px(c.strike)}P</b><div class="sub">${c.expiry} · ${c.dte}d${c.long_strike?' · / '+px(c.long_strike)+'P':''}</div></td>
+      <td class="money">${px(c.net_credit)}<div class="sub">BP return ${pct(c.return_on_buying_power_pct)}</div></td><td class="money"><b>${px(c.net_basis)}</b><div class="sub">buy ≤ ${px(r.valuation.acquisition_price)}</div></td>
+      <td>${pct(c.discount_to_spot_pct)}</td><td><b>${pct(c.annualised_return_pct)}</b><div class="sub">${pct(c.holding_return_pct)} · ${esc(c.return_basis)}</div></td>
+      <td>${Number(c.delta).toFixed(2)} / ${pct(c.iv_pct)}<div class="sub">VRP ${c.vrp_vol_points==null?'—':c.vrp_vol_points+'v'}</div></td>
+      <td>OI ${c.open_interest}<div class="sub">spread ${pct(c.spread_pct)}</div></td><td>${c.sizing.max_contracts}<div class="sub">${money(c.sizing.full_assignment_cost)}</div></td><td class="score">${c.score}</td></tr>${renderDetail(r,i)}`;
+  });
+  html+='</tbody></table>';
+  if(data.errors.length)html+=`<div class="notice error">${data.errors.map(e=>`<b>${esc(e.symbol)}</b> ${esc(e.error)}`).join(' · ')}</div>`;
+  $('table').innerHTML=html;
+  window.latestRows=data.rows;
+}
+async function validateTws(symbol,i){
+  const target=$('tws-'+i),candidate=window.latestRows[i].candidate;
+  target.innerHTML='<span class="loader"></span>Requesting exact TWS quote and what-if margin…';
+  try{const res=await fetch('/api/value-puts/validate-tws',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol,candidate})});
+    const d=await res.json();if(!res.ok)throw new Error(d.error||'TWS validation failed');
+    target.innerHTML=`<span class="good">TWS validated</span> · ${px(d.net_credit)} credit · basis ${px(d.net_basis)} · initial margin ${money(d.what_if.initial_margin_change)} · maintenance ${money(d.what_if.maintenance_margin_change)}. No order staged.`;
+  }catch(e){target.innerHTML=`<span class="bad">${esc(e.message)}</span>`}
+}
+$('scan').onclick=async()=>{
+  const btn=$('scan'); btn.disabled=true;btn.innerHTML='<span class="loader"></span>Scanning';
+  $('table').innerHTML='<div class="empty"><span class="loader"></span>Comparing fundamentals, valuation ranges and option chains…</div>';
+  const payload={symbols:$('symbols').value.split(','),source:$('source').value,mode,
+    nlv:Number($('nlv').value),available_cash:Number($('cash').value),hurdle_rate:Number($('hurdle').value)/100,
+    sector_limit_pct:Number($('sectorCap').value)/100,min_dte:Number($('minDte').value),max_dte:Number($('maxDte').value),
+    overrides:parseOverrides($('overrides').value)};
+  try{const res=await fetch('/api/value-puts/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json();if(!res.ok)throw new Error(data.error||'Scan failed');render(data)}
+  catch(e){$('table').innerHTML=`<div class="empty error">${esc(e.message)}</div>`}
+  finally{btn.disabled=false;btn.textContent='Run value scan'}
+};
+</script>
+</body>
+</html>

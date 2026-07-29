@@ -251,7 +251,12 @@ def monitor(cadence: str = "daily", mode: str = "auto", account: str | None = No
     symbols = [x["symbol"] for x in research]
     errors = []
     actual_mode = mode
-    gate = macro_risk_gate()
+    # Practice mode must be deterministic: a real CPI/FOMC date should not
+    # prevent the inert mock-stage workflow from being exercised.
+    gate = ({"action": "CLEAR", "size_multiplier": 1.0,
+             "reason": "Practice mode uses a deterministic clear macro gate.",
+             "event": None}
+            if mode == "mock" else macro_risk_gate())
     selection_meta = None
     if mode in ("live", "auto"):
         try:
