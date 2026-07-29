@@ -63,6 +63,8 @@ def test_value_put_web_page_and_api():
     page = client.get("/value-puts")
     assert page.status_code == 200
     assert b"Value Entry Put Scanner" in page.data
+    trailing_slash_page = client.get("/value-puts/")
+    assert trailing_slash_page.status_code == 200
     response = client.post("/api/value-puts/scan", json={
         "source": "mock", "symbols": ["BAC", "AAL"],
         "mode": "cash_secured", "nlv": 100_000, "available_cash": 50_000,
