@@ -179,7 +179,7 @@ def pattern_scanner_page():
     return send_from_directory("static", "pattern_scanner.html")
 
 
-@app.get("/value-puts")
+@app.get("/value-puts", strict_slashes=False)
 def value_put_scanner_page():
     return send_from_directory("static", "value_puts.html")
 
