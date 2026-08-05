@@ -1,5 +1,34 @@
 # TE Playbook + Campaign Engine v3
 
+## X4 Live Strategy Lab
+
+Open `/x4` to connect the visual X4 blueprint to the existing Forward Vol
+Scanner data engine. Practice mode is deterministic. Live mode runs on the
+same computer as TWS and uses the current listed option surface to build one
+inspectable candidate for each X4 posture:
+
+* **V14:** put BWB plus a separate long-tail put;
+* **V17:** bullish put BWB plus long-tail protection, with a live upper-plateau
+  check; and
+* **V22:** an IV-expected-move-width symmetric put fly plus one approximately
+  75-delta ITM call, with the fly/call ratio solved from model delta.
+
+The page shows spot, selected expiry, ATM IV, IV percentile, IV expected move,
+forward VRP, 25-delta skew, term structure, trend, ATR, exact listed legs,
+NBBO/model price, Greeks, liquidity flags, risk profiles, OptionStrat links and
+a ONE-ready leg checklist. Auto-selection maps the measured setup, IV state
+and posture to V14/V17/V22; each input can also be overridden for research.
+
+The public X4 material does not define a complete mechanical strike algorithm.
+The implementation therefore labels its strike rules as an engineering
+translation and keeps all candidates in `HYPOTHESIS` status. X4 order staging
+is disabled until matched-date and forward evidence validate those rules.
+
+```powershell
+python webapp.py
+# http://127.0.0.1:8765/x4
+```
+
 ## Value Entry Put Scanner
 
 Open `/value-puts` for the valuation-first stock-acquisition module. It keeps
