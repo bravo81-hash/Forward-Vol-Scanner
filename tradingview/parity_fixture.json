@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "source_commit": "9e604d2bbd45a4403b4fe6f8a326ff5d294cf594",
+  "parity_date": "2026-07-28",
+  "pine_file": "tradingview/fvs_console_v3.pine",
+  "gate1": {
+    "sell_vol_min_v": 3.0,
+    "buy_vol_max_v": -2.0,
+    "event_vol_requires": [
+      "known_fomc_window",
+      "front_inversion",
+      "rich_front_kink"
+    ],
+    "fallback": "DELTA"
+  },
+  "har_rv": {
+    "rv7_weight": 0.5,
+    "rv21_weight": 0.3,
+    "rv63_weight": 0.2
+  },
+  "iv_percentile_bands": {
+    "CMP_lt": 25,
+    "NRM_lt": 60,
+    "ELV_lt": 85,
+    "STR_gte": 85
+  },
+  "time_spreads": {
+    "front_dte_min": 12,
+    "front_dte_max": 21,
+    "back_dte_min": 26,
+    "back_dte_max": 45,
+    "timeedge_scope": "SPX only",
+    "timezone_scope": "RUT; FVS progression check required"
+  },
+  "calendar_scope": {
+    "embedded": [
+      "FOMC 2026"
+    ],
+    "app_confirmation_required": [
+      "CPI",
+      "PPI",
+      "NFP"
+    ]
+  }
+}
