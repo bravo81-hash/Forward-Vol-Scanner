@@ -314,6 +314,80 @@ def api_direction():
     return jsonify(out)
 
 
+@app.get("/api/equity/gate-e")
+def api_equity_gate_e():
+    """Gate E: single-name equity structure selection.
+
+    symbol: any US equity ticker
+    hold:   short (1-2w) | medium (4-6w) | long (months, LEAPS)
+    mode:   auto | yf | mock
+    trigger: 1 to declare the reclaim trigger already fired
+    """
+    from core.chain import MOCK
+    from core.yf_client import build_context_yf
+    from selection import cards_e, gate_e
+
+    symbol = request.args.get("symbol", "").upper().strip()
+    if not symbol:
+        return jsonify({"error": "symbol required"}), 400
+    hold = request.args.get("hold", "medium").lower()
+    if hold not in gate_e.HOLDS:
+        return jsonify({"error": f"bad hold '{hold}'"}), 400
+    mode = request.args.get("mode", "auto").lower()
+    fired = request.args.get("trigger", "0") in ("1", "true", "yes")
+
+    errors, ctx = [], None
+    order = {"yf": ["yf"], "mock": ["mock"], "auto": ["yf", "mock"]}.get(mode)
+    if order is None:
+        return jsonify({"error": f"bad mode '{mode}'"}), 400
+    for m in order:
+        if m == "mock" and symbol not in MOCK:
+            errors.append("mock: no synthetic surface for symbol")
+            continue
+        try:
+            ctx = build_context_yf(symbol) if m == "yf" else build_context(symbol, m)
+            break
+        except Exception as e:                       # noqa: BLE001
+            errors.append(f"{m}: {type(e).__name__}: {e}")
+    if ctx is None:
+        return jsonify({"error": "no data source available", "errors": errors}), 502
+
+    payload = gate_e.build(ctx, hold, trigger_fired=fired)
+    payload["card"] = cards_e.render(payload)
+    payload["errors"] = errors
+    return jsonify(payload)
+
+
+@app.get("/api/equity/radar")
+def api_equity_radar():
+    """Radar-B watchlist. NOT signals — entries fire on the separate trigger."""
+    from core.fundamentals import fetch_many
+    from core.stock_data import histories_yf
+    from selection import radar_b
+    from selection.stock_radar import load_universe
+
+    limit = int(request.args.get("limit", radar_b.OUTPUT_LIMIT))
+    syms = [u["symbol"] for u in load_universe()]
+    only = request.args.get("symbols")
+    if only:
+        want = {s.strip().upper() for s in only.split(",") if s.strip()}
+        syms = [s for s in syms if s in want] or sorted(want)
+
+    bars = histories_yf(syms, period="2y")
+    bench = histories_yf(["SPY"], period="2y").get("SPY")
+    funds = fetch_many([s for s in syms if s in bars])
+    out = radar_b.scan(bars, funds, bench_bars=bench, limit=limit)
+
+    out["watchlist"] = [{
+        "symbol": r["symbol"], "score": r["score"],
+        "score_parts": r.get("score_parts", {}),
+        "reasons": r["reasons"],
+        "metrics": {k: v for k, v in r["metrics"].__dict__.items()
+                    if not k.startswith("_") and k != "blocks"},
+    } for r in out["watchlist"]]
+    return jsonify(out)
+
+
 @app.get("/api/smsf")
 def api_smsf():
     """SMSF tab: single-expiry structure selection for the cash account.

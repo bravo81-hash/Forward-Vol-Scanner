@@ -8,8 +8,9 @@ from .call_bwb import CallBWB
 from .fly_variants import BalancedPutFly, IronFly, TargetFly, WideOtmPutFly
 from .m3_bwb_call import M3BWBCall
 from .debit_spread import DirectionalDebitSpread
+from .zebra import Zebra
 
 REGISTRY = {s.key: s() for s in
             (Calendar, DoubleCalendar, Diagonal, IronCondor, PutBWB, Butterfly,
              BalancedPutFly, IronFly, WideOtmPutFly, CallBWB, M3BWBCall, TargetFly,
-             DirectionalDebitSpread)}
+             DirectionalDebitSpread, Zebra)}
