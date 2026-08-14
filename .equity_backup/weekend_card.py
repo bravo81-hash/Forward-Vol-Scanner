@@ -61,10 +61,9 @@ def run(symbols: list[str] | None = None, limit: int = 5,
 
         card, payload = None, None
         try:
-            from selection.equity_context import build as build_equity
-            ctx, ctx_bars = build_equity(symbol, "long")
-            payload = gate_e.build(ctx, "long", trigger_fired=trig["fired"],
-                                   bars=ctx_bars or bars[symbol])
+            from core.yf_client import build_context_yf
+            ctx = build_context_yf(symbol)
+            payload = gate_e.build(ctx, "long", trigger_fired=trig["fired"])
             card = cards_e.render(payload,
                                   radar={"reasons": row["reasons"]},
                                   trigger=trig)

@@ -38,7 +38,7 @@ EARNINGS_BLACKOUT_SESSIONS = 5
 
 
 # --------------------------------------------------------------- helpers --
-def _closes(bars): return [b["close"] for b in bars]
+def _closes(bars): return [b["c"] for b in bars]
 
 
 def _sma(xs: list[float], n: int) -> float | None:
@@ -50,9 +50,9 @@ def _atr(bars: list[dict], n: int) -> float | None:
         return None
     trs = []
     for prev, cur in zip(bars[-n - 1:-1], bars[-n:]):
-        trs.append(max(cur["high"] - cur["low"],
-                       abs(cur["high"] - prev["close"]),
-                       abs(cur["low"] - prev["close"])))
+        trs.append(max(cur["h"] - cur["l"],
+                       abs(cur["h"] - prev["c"]),
+                       abs(cur["l"] - prev["c"])))
     return sum(trs) / n if trs else None
 
 
@@ -64,8 +64,8 @@ def _higher_lows(bars: list[dict], low_idx: int, window: int = 10) -> int:
     lows, i = [], window
     while i < len(tail) - window:
         seg = tail[i - window:i + window]
-        if tail[i]["low"] == min(b["low"] for b in seg):
-            lows.append(tail[i]["low"])
+        if tail[i]["l"] == min(b["l"] for b in seg):
+            lows.append(tail[i]["l"])
             i += window
         else:
             i += 1
@@ -113,14 +113,16 @@ def base_metrics(symbol: str, bars: list[dict],
     window = bars[-252:]
     closes = _closes(bars)
     m.price = closes[-1]
-    m.high_52w = max(b["high"] for b in window)
-    m.low_52w = min(b["low"] for b in window)
+    m.high_52w = max(b["h"] for b in window)
+    m.low_52w = min(b["l"] for b in window)
     m.drawdown = (m.high_52w - m.price) / m.high_52w if m.high_52w else 0.0
 
-    low_idx = min(range(len(window)), key=lambda i: window[i]["low"])
+    low_idx = max(range(len(window)), key=lambda i: -window[i]["l"])
+    low_idx = min(range(len(window)), key=lambda i: window[i]["l"])
     m.base_weeks = (len(window) - 1 - low_idx) / 5.0
 
-    lows = [b["low"] for b in bars]
+    lows = [b["l"] for b in bars]
+    trailing_low_20 = min(lows[-20:])
     m.sessions_since_new_low = 0
     for i in range(len(bars) - 1, max(len(bars) - 60, 20), -1):
         if lows[i] <= min(lows[i - 20:i]):
@@ -131,10 +133,10 @@ def base_metrics(symbol: str, bars: list[dict],
     m.atr_compression = (atr20 / atr100) if atr20 and atr100 else 1.0
 
     last8w = bars[-40:]
-    hi, lo = max(b["high"] for b in last8w), min(b["low"] for b in last8w)
+    hi, lo = max(b["h"] for b in last8w), min(b["l"] for b in last8w)
     m.base_width = (hi - lo) / m.price if m.price else 1.0
 
-    vols = [b.get("volume", 0.0) for b in bars]
+    vols = [b.get("v", 0.0) for b in bars]
     m.dollar_volume = (sum(vols[-90:]) / 90.0) * m.price if len(vols) >= 90 else 0.0
     v20, v100 = sum(vols[-20:]) / 20.0, sum(vols[-100:]) / 100.0
     m.volume_dryup = (v20 / v100) if v100 else 1.0
@@ -308,7 +310,7 @@ def trigger(m: BaseMetrics, bars: list[dict],
             f"The 50-day slope is {m.sma50_slope * 100:+.1f}% over ten sessions, so the "
             f"line is still falling and offers no support to reclaim.")
 
-    vols = [b.get("volume", 0.0) for b in bars]
+    vols = [b.get("v", 0.0) for b in bars]
     mult = (vols[-1] / (sum(vols[-21:-1]) / 20.0)) if len(vols) >= 21 and sum(vols[-21:-1]) else 0.0
     if mult >= MIN_TRIGGER_VOL_MULT:
         checks.append(

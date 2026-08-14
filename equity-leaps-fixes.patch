@@ -1,0 +1,873 @@
+From b9c690d4168523f37ebc726a85576436080e64e7 Mon Sep 17 00:00:00 2001
+From: FVS Equity LEAPS <spec@local>
+Date: Fri, 14 Aug 2026 04:01:40 +0000
+Subject: [PATCH] Fix four bugs found in Codespaces testing
+
+1. KeyError 'c': histories_yf emits open/high/low/close/volume, not o/h/l/c/v.
+2. IV shown as 3290%: core.regime stores iv30/rv21 as PERCENT (32.90), not
+   decimals. Removed the *100 in messages; iv_pctl is already 0-100.
+3. NFLX read as Stage 2: core.regime's trend is a short-horizon EMA read
+   tuned for index work and called a multi-day bounce an uptrend. Stage now
+   comes from stage_from_bars() using the 150-day line plus the 13/26/52w
+   high sequence. Without bars, Gate E refuses to assert Stage 2 at all.
+4. hold=long returned a 28-day diagonal: core.chain.SCAN_DTE caps the yf
+   context at 85 DTE so no LEAPS expiry was ever loaded. Added dte_range to
+   build_context_yf, selection/equity_context.py to pick the window per hold,
+   a TENOR BLOCK when the surface lacks the tenor, and a per-leg DTE filter.
+
+Also: ACTION now names the structure actually rendered (it said ZEBRA while
+showing a diagonal), and the missing UI is added at /equity with nav links.
+
+7 regression tests added; 33 in the module, 297 in the suite.
+---
+ core/yf_client.py           |  16 +++-
+ selection/cards_e.py        |   4 +-
+ selection/equity_context.py |  31 ++++++++
+ selection/gate_e.py         | 101 +++++++++++++++++++----
+ selection/radar_b.py        |  28 +++----
+ static/equity_leaps.html    | 154 ++++++++++++++++++++++++++++++++++++
+ static/index.html           |   2 +-
+ static/last_hour.html       |   2 +-
+ static/pattern_scanner.html |   2 +-
+ static/value_puts.html      |   2 +-
+ tests/test_equity_leaps.py  | 111 ++++++++++++++++++++------
+ webapp.py                   |  30 +++----
+ weekend_card.py             |   7 +-
+ 13 files changed, 405 insertions(+), 85 deletions(-)
+ create mode 100644 selection/equity_context.py
+ create mode 100644 static/equity_leaps.html
+
+diff --git a/core/yf_client.py b/core/yf_client.py
+index 7711080..2b39faa 100644
+--- a/core/yf_client.py
++++ b/core/yf_client.py
+@@ -84,13 +84,21 @@ def _slice_from_chain(expiry: date, dte: int, spot: float, calls, puts,
+                  atm_spread_pct=round(spread, 3), oi_atm=oi)
+ 
+ 
+-def build_context_yf(symbol: str, today: date | None = None) -> Context:
++def build_context_yf(symbol: str, today: date | None = None,
++                     dte_range: tuple[int, int] | None = None) -> Context:
++    """Build a Context from yfinance.
++
++    dte_range overrides SCAN_DTE. The default (5, 85) is right for index
++    premium work but excludes every LEAPS expiry, so single-name months-long
++    structures must pass a wider window explicitly.
++    """
+     try:
+         import yfinance as yf
+     except ImportError as e:
+         raise RuntimeError("yfinance not installed — pip install yfinance") from e
+ 
+     today = today or trading_today()
++    window = dte_range or SCAN_DTE
+     symbol = symbol.upper()
+     fetch = PROXY.get(symbol, symbol)
+     qdiv = q_for(symbol)
+@@ -108,7 +116,7 @@ def build_context_yf(symbol: str, today: date | None = None) -> Context:
+     for exp in (tk.options or []):
+         d = datetime.strptime(exp, "%Y-%m-%d").date()
+         dte = (d - today).days
+-        if not SCAN_DTE[0] <= dte <= SCAN_DTE[1]:
++        if not window[0] <= dte <= window[1]:
+             continue
+         try:
+             ch = tk.option_chain(exp)
+@@ -117,11 +125,11 @@ def build_context_yf(symbol: str, today: date | None = None) -> Context:
+             s = None
+         if s:
+             slices.append(s)
+-        if len(slices) >= MAX_EXPIRIES:
++        if len(slices) >= (MAX_EXPIRIES if window == SCAN_DTE else MAX_EXPIRIES * 2):
+             break
+     if len(slices) < 2:
+         raise RuntimeError(f"yfinance: usable chain too thin for {fetch} "
+-                           f"({len(slices)} expiries in {SCAN_DTE} DTE)")
++                           f"({len(slices)} expiries in {window} DTE)")
+     slices.sort(key=lambda s: s.dte)
+     iv30 = iv_cm(slices, 30) * 100
+ 
+diff --git a/selection/cards_e.py b/selection/cards_e.py
+index 380e565..53ba28d 100644
+--- a/selection/cards_e.py
++++ b/selection/cards_e.py
+@@ -75,8 +75,8 @@ def render(gate_e: dict, *, radar: dict | None = None,
+             f"structure, which is what gates the direction of any structure below.")
+         if i.get("iv_rv") is not None:
+             sections["SETUP"].append(
+-                f"Implied volatility sits at {i['iv30'] * 100:.1f}% against realised of "
+-                f"{i['rv21'] * 100:.1f}%, a ratio of {i['iv_rv']:.2f}, which decides whether "
++                f"Implied volatility sits at {i['iv30']:.1f}% against realised of "
++                f"{i['rv21']:.1f}%, a ratio of {i['iv_rv']:.2f}, which decides whether "
+                 f"this is a name to buy premium on or sell it on.")
+ 
+     # ---------------------------------------------------------- STRUCTURE
+diff --git a/selection/equity_context.py b/selection/equity_context.py
+new file mode 100644
+index 0000000..2ee83f1
+--- /dev/null
++++ b/selection/equity_context.py
+@@ -0,0 +1,31 @@
++"""Context + bars for the equity LEAPS engine, with the right DTE window.
++
++The default yfinance context caps expiries at SCAN_DTE (5, 85) days, which is
++correct for index premium work and useless for LEAPS. Requesting a months-long
++hold against that surface silently returns a four-week structure — a card that
++looks right and is wrong. So the window is derived from the hold here, once.
++"""
++from __future__ import annotations
++
++from datetime import date
++
++from core.models import Context
++
++# Widened windows per hold. The lower bound stays generous because single-name
++# LEAPS chains are sparse and an exact target often is not listed.
++WINDOWS = {"short": (3, 45), "medium": (14, 120), "long": (90, 500)}
++
++
++def window_for(hold: str) -> tuple[int, int]:
++    return WINDOWS.get(hold, WINDOWS["medium"])
++
++
++def build(symbol: str, hold: str = "medium", *,
++          today: date | None = None) -> tuple[Context, list[dict]]:
++    """Return (context, daily bars). Raises RuntimeError if unusable."""
++    from core.stock_data import histories_yf
++    from core.yf_client import build_context_yf
++
++    ctx = build_context_yf(symbol, today=today, dte_range=window_for(hold))
++    bars = histories_yf([symbol], period="2y").get(symbol, [])
++    return ctx, bars
+diff --git a/selection/gate_e.py b/selection/gate_e.py
+index cf75adf..6b75e10 100644
+--- a/selection/gate_e.py
++++ b/selection/gate_e.py
+@@ -28,21 +28,54 @@ SHORT_PREMIUM = {"condor", "bwb", "butterfly", "iron_fly", "call_bwb",
+                  "wide_otm_put_fly", "target_fly"}
+ 
+ 
+-def _stage(reg: dict) -> tuple[str, int]:
+-    """Weinstein-style stage from trend/bias already computed in core.regime."""
++def stage_from_bars(bars: list[dict]) -> tuple[str, int]:
++    """Weinstein stage from LONG-horizon structure — the 30-week line.
++
++    core.regime's `trend` is a short-horizon EMA read tuned for index premium
++    work. On NFLX it returned "UP" off a multi-day bounce while the weekly
++    structure was unambiguously Stage 4, which is exactly the failure this
++    engine exists to avoid. So the stage is computed here from price against a
++    rising or falling 150-day line plus the sequence of highs, and regime.trend
++    is not consulted at all.
++    """
++    closes = [b["close"] for b in bars]
++    if len(closes) < 200:
++        return "Stage unknown (insufficient history)", 0
++
++    sma150 = sum(closes[-150:]) / 150.0
++    prev150 = sum(closes[-170:-20]) / 150.0
++    slope = (sma150 - prev150) / prev150 if prev150 else 0.0
++    price = closes[-1]
++
++    highs = [b["high"] for b in bars]
++    h52 = max(highs[-252:]) if len(highs) >= 252 else max(highs)
++    h26 = max(highs[-126:])
++    h13 = max(highs[-63:])
++    descending = h13 < h26 < h52
++
++    if price > sma150 and slope > 0.005 and not descending:
++        return "Stage 2 (advancing)", 1
++    if price < sma150 and (slope < -0.005 or descending):
++        return "Stage 4 (declining)", -1
++    if descending and price < h52 * 0.75:
++        return "Stage 4 (declining)", -1
++    return "Stage 1/3 (basing or topping)", 0
++
++
++def _stage(reg: dict, bars: list[dict] | None = None) -> tuple[str, int]:
++    if bars:
++        return stage_from_bars(bars)
++    # No bars supplied: fall back to regime, but never claim Stage 2 from a
++    # short-horizon read alone — an unconfirmed uptrend is treated as neutral.
+     trend = (reg.get("trend") or "").lower()
+     bias = reg.get("bias", 0)
+-    adx = reg.get("adx", 0.0)
+-    if "up" in trend and bias > 0:
+-        return "Stage 2 (advancing)", 1
+     if "down" in trend and bias < 0:
+         return "Stage 4 (declining)", -1
+-    if adx and adx < 20:
+-        return "Stage 1/3 (basing or topping)", 0
+-    return "Stage 1/3 (indeterminate)", 0
++    return "Stage 1/3 (unconfirmed — no long-horizon bars)", 0
+ 
+ 
+ def iv_rv(reg: dict) -> tuple[float | None, float | None, float | None]:
++    """IV30 and RV21 as PERCENT (core.regime stores them that way, e.g. 32.90)."""
+     iv = reg.get("iv30")
+     rv = reg.get("rv21")
+     if not iv or not rv:
+@@ -52,16 +85,21 @@ def iv_rv(reg: dict) -> tuple[float | None, float | None, float | None]:
+ 
+ def select(ctx: Context, hold: str = "medium", *,
+            trend_state: int | None = None,
+-           trigger_fired: bool = False) -> dict:
+-    """Return the Gate E decision payload for one ticker."""
++           trigger_fired: bool = False,
++           bars: list[dict] | None = None) -> dict:
++    """Return the Gate E decision payload for one ticker.
++
++    `bars` are daily OHLC dicts (core.stock_data.histories_yf format). Supply
++    them whenever available — without them the stage cannot be confirmed and
++    the trend gate deliberately refuses to assert Stage 2.
++    """
+     reg = ctx.regime or {}
+-    stage_label, stage = _stage(reg)
++    stage_label, stage = _stage(reg, bars)
+     if trend_state is not None:
+         stage = trend_state
+ 
+     iv, rv, ratio = iv_rv(reg)
+-    iv_rank = reg.get("iv_pctl")
+-    iv_rank = iv_rank * 100 if iv_rank is not None and iv_rank <= 1 else iv_rank
++    iv_rank = reg.get("iv_pctl")      # already 0-100 from core.regime
+ 
+     blocks: list[str] = []
+     notes: list[str] = []
+@@ -85,8 +123,8 @@ def select(ctx: Context, hold: str = "medium", *,
+     if ratio is not None and ratio < IVRV_FLOOR:
+         sell_blocked = True
+         blocks.append(
+-            f"PREMIUM-SELLING BLOCK: implied volatility of {iv * 100:.1f}% is running "
+-            f"below thirty-day realised of {rv * 100:.1f}%, giving a ratio of {ratio:.2f}, "
++            f"PREMIUM-SELLING BLOCK: implied volatility of {iv:.1f}% is running "
++            f"below thirty-day realised of {rv:.1f}%, giving a ratio of {ratio:.2f}, "
+             f"so any short-premium structure would be selling volatility at a "
+             f"steep discount to what the stock is actually delivering.")
+         notes.append(
+@@ -95,7 +133,7 @@ def select(ctx: Context, hold: str = "medium", *,
+             "is exactly the condition that makes buying the long leg attractive.")
+     elif ratio is not None:
+         notes.append(
+-            f"Implied volatility of {iv * 100:.1f}% against realised of {rv * 100:.1f}% gives "
++            f"Implied volatility of {iv:.1f}% against realised of {rv:.1f}% gives "
+             f"a ratio of {ratio:.2f}, so premium is fairly to richly priced and "
+             f"short-premium structures are permitted.")
+ 
+@@ -142,6 +180,18 @@ def select(ctx: Context, hold: str = "medium", *,
+     lo, hi, target = HOLDS.get(hold, HOLDS["medium"])
+     slc = ctx.slice_near(target)
+ 
++    # A "long" hold must actually have long-dated expiries on the surface.
++    # core.chain.SCAN_DTE caps the default yfinance context at 85 DTE, so
++    # without this check a months-long request silently returns a 28-day
++    # structure — the exact mismatch that makes a card look right and be wrong.
++    if slc is not None and not (lo <= slc.dte <= hi):
++        blocks.append(
++            f"TENOR BLOCK: the requested {hold} hold needs an expiry between {lo} "
++            f"and {hi} days, but the nearest available on this surface is "
++            f"{slc.dte} days, so no structure is offered rather than one built on "
++            f"the wrong tenor.")
++        picks = []
++
+     action = "STAND ASIDE" if (blocks and not picks) else (
+         f"{picks[0].upper()}" if picks else "STAND ASIDE")
+ 
+@@ -172,6 +222,7 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
+     """Full payload: selection + concrete suggestions from the registry."""
+     from strategies import REGISTRY
+ 
++    lo, hi, _ = HOLDS.get(hold, HOLDS["medium"])
+     out = select(ctx, hold, **kw)
+     suggestions = []
+     for key in out["structures"]:
+@@ -179,7 +230,15 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
+         if not strat:
+             continue
+         try:
+-            suggestions += [s.to_dict() for s in strat.propose(ctx)]
++            for sug in strat.propose(ctx):
++                dtes = {(l.expiry - ctx.today).days for l in sug.legs}
++                if not any(lo <= d <= hi for d in dtes):
++                    out["notes"].append(
++                        f"Dropped {sug.label} because its legs sit at "
++                        f"{sorted(dtes)} days, outside the {lo}-{hi} day window "
++                        f"the {hold} hold requires.")
++                    continue
++                suggestions += [sug.to_dict()]
+         except Exception as exc:
+             out["notes"].append(
+                 f"Structure {key} could not be built for {ctx.symbol} "
+@@ -187,4 +246,12 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
+                 f"shortlist rather than shown with partial data.")
+     suggestions.sort(key=lambda s: s.get("score", 0), reverse=True)
+     out["suggestions"] = suggestions
++    # ACTION must name the structure the card actually shows. Ranking by score
++    # can reorder the shortlist, and an action line that disagrees with the
++    # legs below it is worse than no action line.
++    if suggestions:
++        out["action"] = suggestions[0]["strategy"].upper()
++    elif out["eligible"]:
++        out["action"] = "STAND ASIDE"
++        out["eligible"] = False
+     return out
+diff --git a/selection/radar_b.py b/selection/radar_b.py
+index e887a38..abb4a54 100644
+--- a/selection/radar_b.py
++++ b/selection/radar_b.py
+@@ -38,7 +38,7 @@ EARNINGS_BLACKOUT_SESSIONS = 5
+ 
+ 
+ # --------------------------------------------------------------- helpers --
+-def _closes(bars): return [b["c"] for b in bars]
++def _closes(bars): return [b["close"] for b in bars]
+ 
+ 
+ def _sma(xs: list[float], n: int) -> float | None:
+@@ -50,9 +50,9 @@ def _atr(bars: list[dict], n: int) -> float | None:
+         return None
+     trs = []
+     for prev, cur in zip(bars[-n - 1:-1], bars[-n:]):
+-        trs.append(max(cur["h"] - cur["l"],
+-                       abs(cur["h"] - prev["c"]),
+-                       abs(cur["l"] - prev["c"])))
++        trs.append(max(cur["high"] - cur["low"],
++                       abs(cur["high"] - prev["close"]),
++                       abs(cur["low"] - prev["close"])))
+     return sum(trs) / n if trs else None
+ 
+ 
+@@ -64,8 +64,8 @@ def _higher_lows(bars: list[dict], low_idx: int, window: int = 10) -> int:
+     lows, i = [], window
+     while i < len(tail) - window:
+         seg = tail[i - window:i + window]
+-        if tail[i]["l"] == min(b["l"] for b in seg):
+-            lows.append(tail[i]["l"])
++        if tail[i]["low"] == min(b["low"] for b in seg):
++            lows.append(tail[i]["low"])
+             i += window
+         else:
+             i += 1
+@@ -113,16 +113,14 @@ def base_metrics(symbol: str, bars: list[dict],
+     window = bars[-252:]
+     closes = _closes(bars)
+     m.price = closes[-1]
+-    m.high_52w = max(b["h"] for b in window)
+-    m.low_52w = min(b["l"] for b in window)
++    m.high_52w = max(b["high"] for b in window)
++    m.low_52w = min(b["low"] for b in window)
+     m.drawdown = (m.high_52w - m.price) / m.high_52w if m.high_52w else 0.0
+ 
+-    low_idx = max(range(len(window)), key=lambda i: -window[i]["l"])
+-    low_idx = min(range(len(window)), key=lambda i: window[i]["l"])
++    low_idx = min(range(len(window)), key=lambda i: window[i]["low"])
+     m.base_weeks = (len(window) - 1 - low_idx) / 5.0
+ 
+-    lows = [b["l"] for b in bars]
+-    trailing_low_20 = min(lows[-20:])
++    lows = [b["low"] for b in bars]
+     m.sessions_since_new_low = 0
+     for i in range(len(bars) - 1, max(len(bars) - 60, 20), -1):
+         if lows[i] <= min(lows[i - 20:i]):
+@@ -133,10 +131,10 @@ def base_metrics(symbol: str, bars: list[dict],
+     m.atr_compression = (atr20 / atr100) if atr20 and atr100 else 1.0
+ 
+     last8w = bars[-40:]
+-    hi, lo = max(b["h"] for b in last8w), min(b["l"] for b in last8w)
++    hi, lo = max(b["high"] for b in last8w), min(b["low"] for b in last8w)
+     m.base_width = (hi - lo) / m.price if m.price else 1.0
+ 
+-    vols = [b.get("v", 0.0) for b in bars]
++    vols = [b.get("volume", 0.0) for b in bars]
+     m.dollar_volume = (sum(vols[-90:]) / 90.0) * m.price if len(vols) >= 90 else 0.0
+     v20, v100 = sum(vols[-20:]) / 20.0, sum(vols[-100:]) / 100.0
+     m.volume_dryup = (v20 / v100) if v100 else 1.0
+@@ -310,7 +308,7 @@ def trigger(m: BaseMetrics, bars: list[dict],
+             f"The 50-day slope is {m.sma50_slope * 100:+.1f}% over ten sessions, so the "
+             f"line is still falling and offers no support to reclaim.")
+ 
+-    vols = [b.get("v", 0.0) for b in bars]
++    vols = [b.get("volume", 0.0) for b in bars]
+     mult = (vols[-1] / (sum(vols[-21:-1]) / 20.0)) if len(vols) >= 21 and sum(vols[-21:-1]) else 0.0
+     if mult >= MIN_TRIGGER_VOL_MULT:
+         checks.append(
+diff --git a/static/equity_leaps.html b/static/equity_leaps.html
+new file mode 100644
+index 0000000..ef01fea
+--- /dev/null
++++ b/static/equity_leaps.html
+@@ -0,0 +1,154 @@
++<!doctype html>
++<html lang="en">
++<head>
++<meta charset="utf-8">
++<meta name="viewport" content="width=device-width, initial-scale=1">
++<title>Equity LEAPS Engine</title>
++<style>
++:root{--bg:#0b0f16;--panel:#111826;--line:#1e2a3d;--ink:#dfe7f3;--dim:#8496b0;
++      --accent:#7aa2f7;--warn:#e0af68;--bad:#f7768e;--good:#9ece6a;}
++*{box-sizing:border-box}
++body{margin:0;background:var(--bg);color:var(--ink);
++     font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
++header{display:flex;align-items:baseline;gap:18px;padding:14px 22px;
++       border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
++h1{font:700 20px/1 Georgia,serif;margin:0}
++.sub{color:var(--dim);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
++nav{margin-left:auto;display:flex;gap:16px}
++nav a{color:var(--ink);text-decoration:none;font-size:13px;opacity:.75}
++nav a:hover{opacity:1;text-decoration:underline}
++main{padding:20px 22px;max-width:1100px}
++.bar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;
++     background:var(--panel);border:1px solid var(--line);padding:14px;border-radius:8px}
++label{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
++      color:var(--dim);margin-bottom:5px}
++input,select{background:#0c121d;color:var(--ink);border:1px solid var(--line);
++             border-radius:6px;padding:8px 10px;font:inherit;min-width:120px}
++button{background:var(--accent);color:#0b0f16;border:0;border-radius:6px;
++       padding:9px 18px;font:600 14px inherit;cursor:pointer}
++button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
++button:disabled{opacity:.5;cursor:default}
++.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
++      padding:18px;margin-top:16px}
++.chead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
++       border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:12px}
++.sym{font:700 22px/1 Georgia,serif}
++.meta{color:var(--dim);font-size:12px}
++.action{margin-left:auto;font:700 13px inherit;letter-spacing:.1em;
++        padding:5px 12px;border-radius:5px;background:#16324b;color:var(--accent)}
++.action.aside{background:#3a1f28;color:var(--bad)}
++h3{font:600 10px/1 inherit;letter-spacing:.18em;text-transform:uppercase;
++   color:var(--dim);margin:16px 0 7px}
++ul{margin:0;padding-left:18px}
++li{margin:5px 0}
++.flags li{color:var(--warn)}
++.note{color:var(--dim);font-size:12px;margin-top:8px}
++table{width:100%;border-collapse:collapse;margin-top:8px}
++th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);font-size:13px}
++th{color:var(--dim);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
++tr.pick{cursor:pointer}
++tr.pick:hover{background:#16203010}
++.err{color:var(--bad);margin-top:12px}
++.spin{color:var(--dim)}
++</style>
++</head>
++<body>
++<header>
++  <h1>Equity LEAPS Engine</h1>
++  <span class="sub">Radar-B · Gate E</span>
++  <nav>
++    <a href="/">Last Hour</a><a href="/stocks">Stock Radar</a>
++    <a href="/patterns">Pattern Scanner</a><a href="/value-puts">Value Puts</a>
++    <a href="/research">Research</a><a href="/campaigns">Campaign Lab</a>
++  </nav>
++</header>
++
++<main>
++  <div class="bar">
++    <div><label>Ticker</label><input id="sym" value="NFLX" placeholder="NFLX"></div>
++    <div><label>Hold</label>
++      <select id="hold">
++        <option value="short">Short · 1-2 weeks</option>
++        <option value="medium" selected>Medium · 4-6 weeks</option>
++        <option value="long">Long · months (LEAPS)</option>
++      </select></div>
++    <div><label>Trigger fired</label>
++      <select id="trig"><option value="0">No</option><option value="1">Yes</option></select></div>
++    <button id="go">Analyse</button>
++    <button id="radar" class="ghost">Run Radar-B</button>
++  </div>
++
++  <div id="out"></div>
++</main>
++
++<script>
++const $ = s => document.querySelector(s);
++const esc = t => String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
++
++function bullets(items, cls){
++  if(!items || !items.length) return '';
++  return `<ul class="${cls||''}">` + items.map(b=>`<li>${esc(b)}</li>`).join('') + '</ul>';
++}
++
++function renderCard(card){
++  const h = card.header || {};
++  const aside = /STAND ASIDE/.test(card.action||'');
++  const order = ['SETUP','STRUCTURE','ENTRY','EXIT','MANAGE','FLAGS'];
++  const secs = order.filter(s => (card.sections||{})[s])
++    .map(s => `<h3>${s}</h3>` + bullets(card.sections[s], s==='FLAGS'?'flags':''))
++    .join('');
++  return `<div class="card">
++      <div class="chead">
++        <span class="sym">${esc(h.symbol||'')}</span>
++        <span class="meta">$${(h.spot||0).toFixed(2)} · ${esc(h.meta||'')}</span>
++        <span class="action ${aside?'aside':''}">${esc(card.action||'')}</span>
++      </div>${secs}</div>`;
++}
++
++async function analyse(){
++  const sym = $('#sym').value.trim().toUpperCase();
++  if(!sym) return;
++  $('#out').innerHTML = '<p class="spin">Fetching chain and computing stage…</p>';
++  try{
++    const r = await fetch(`/api/equity/gate-e?symbol=${encodeURIComponent(sym)}`
++      + `&hold=${$('#hold').value}&trigger=${$('#trig').value}`);
++    const j = await r.json();
++    if(!r.ok){ $('#out').innerHTML = `<p class="err">${esc(j.error||'failed')}<br>`
++      + esc((j.errors||[]).join(' · ')) + '</p>'; return; }
++    $('#out').innerHTML = renderCard(j.card);
++  }catch(e){ $('#out').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
++}
++
++async function runRadar(){
++  $('#out').innerHTML = '<p class="spin">Running Radar-B across the universe — '
++    + 'this pulls fundamentals per name and takes a minute…</p>';
++  try{
++    const r = await fetch('/api/equity/radar');
++    const j = await r.json();
++    if(!r.ok){ $('#out').innerHTML = `<p class="err">${esc(j.error||'failed')}</p>`; return; }
++    const rows = (j.watchlist||[]).map(w => `<tr class="pick" data-sym="${esc(w.symbol)}">
++        <td><strong>${esc(w.symbol)}</strong></td>
++        <td>${(w.score||0).toFixed(1)}</td>
++        <td>${((w.metrics||{}).drawdown*100||0).toFixed(0)}%</td>
++        <td>${((w.metrics||{}).atr_compression||0).toFixed(2)}x</td>
++        <td>${((w.metrics||{}).base_weeks||0).toFixed(0)}w</td></tr>`).join('');
++    $('#out').innerHTML = `<div class="card">
++      <div class="chead"><span class="sym">Radar-B watchlist</span>
++        <span class="meta">${j.qualified} qualified · showing ${j.returned}</span></div>
++      <table><thead><tr><th>Symbol</th><th>Score</th><th>Drawdown</th>
++        <th>ATR compression</th><th>Base age</th></tr></thead>
++        <tbody>${rows || '<tr><td colspan="5">No names cleared the gates.</td></tr>'}</tbody></table>
++      <p class="note">${esc(j.note||'')} Click a row to run Gate E on it.</p></div>`;
++    document.querySelectorAll('tr.pick').forEach(tr => tr.onclick = () => {
++      $('#sym').value = tr.dataset.sym; analyse();
++    });
++  }catch(e){ $('#out').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
++}
++
++$('#go').onclick = analyse;
++$('#radar').onclick = runRadar;
++$('#sym').addEventListener('keydown', e => { if(e.key === 'Enter') analyse(); });
++analyse();
++</script>
++</body>
++</html>
+diff --git a/static/index.html b/static/index.html
+index b9cefdc..b76a845 100644
+--- a/static/index.html
++++ b/static/index.html
+@@ -57,7 +57,7 @@ padding:10px 16px;font-family:var(--mono);font-size:12px;display:none;max-width:
+  <span id="status">idle</span>
+  <span style="margin-left:auto;font-family:var(--mono);font-size:11px">
+   <a href="/last-hour" style="color:var(--amber);font-weight:700">Last Hour Desk</a> ·
+-  <a href="/stocks" style="color:var(--amber);font-weight:700">Stock Radar</a> ·
++  <a href="/stocks" style="color:var(--amber);font-weight:700">Stock Radar</a><a href="/equity">Equity LEAPS</a> ·
+   <a href="/patterns" style="color:var(--amber);font-weight:700">Pattern Scanner</a> ·
+   <a href="/value-puts" style="color:var(--amber);font-weight:700">Value Entry Puts</a> ·
+   <a href="/x4" style="color:var(--amber);font-weight:700">X4 Lab</a> ·
+diff --git a/static/last_hour.html b/static/last_hour.html
+index 6ec38ba..52cbe4d 100644
+--- a/static/last_hour.html
++++ b/static/last_hour.html
+@@ -35,7 +35,7 @@ main{max-width:1480px;margin:auto;padding:20px 22px 50px}.panel,.strategy,.hero,
+ @media(max-width:1050px){.eventGrid{grid-template-columns:1fr 1fr}}@media(max-width:650px){.eventGrid{grid-template-columns:1fr}.eventTop{align-items:flex-start;gap:8px;flex-direction:column}}
+ </style></head>
+ <body>
+-<header><div class="head"><div class="mark"></div><div class="brand"><div><h1>Last Hour Trade Desk</h1><div class="sub">five structures · one decision · 15:00–15:40 ET</div></div></div><span class="liveStatus" id="status">ready</span><button class="themeToggle" id="themeToggle" type="button" aria-pressed="false">◐ Night</button><a href="/stocks">Stock Radar</a><a href="/patterns">Pattern Scanner</a><a href="/value-puts">Value Puts</a><a href="/x4">X4 Lab</a><a href="/research">Research scanner</a><a href="/campaigns">Campaign Lab</a></div></header>
++<header><div class="head"><div class="mark"></div><div class="brand"><div><h1>Last Hour Trade Desk</h1><div class="sub">five structures · one decision · 15:00–15:40 ET</div></div></div><span class="liveStatus" id="status">ready</span><button class="themeToggle" id="themeToggle" type="button" aria-pressed="false">◐ Night</button><a href="/stocks">Stock Radar</a><a href="/equity">Equity LEAPS</a><a href="/patterns">Pattern Scanner</a><a href="/value-puts">Value Puts</a><a href="/x4">X4 Lab</a><a href="/research">Research scanner</a><a href="/campaigns">Campaign Lab</a></div></header>
+ <main>
+  <div class="panel controls">
+   <div class="field"><label>Data</label><select id="mode"><option value="live">Live TWS</option><option value="mock">Practice / mock</option></select></div>
+diff --git a/static/pattern_scanner.html b/static/pattern_scanner.html
+index 2d0a42f..7ec60bb 100644
+--- a/static/pattern_scanner.html
++++ b/static/pattern_scanner.html
+@@ -16,7 +16,7 @@ main{width:100%;padding:12px clamp(8px,1vw,18px) 40px}.controls{display:grid;gri
+ @media(max-width:1350px){table{min-width:1280px}}
+ @media(max-width:900px){.controls{grid-template-columns:1fr 1fr}.summary{grid-template-columns:repeat(3,1fr)}.head nav a{display:none}}
+ </style></head>
+-<body><header><div class="head"><div class="mark"></div><div><h1>Price-Action Pattern Scanner</h1><div class="sub">distinct Forward-Vol-Scanner module · daily US charts</div></div><nav><button id="theme">◐ Night</button><a href="/">Index desk</a><a href="/stocks">Stock Radar</a><a href="/value-puts">Value Puts</a><a href="/research">Research</a></nav></div></header>
++<body><header><div class="head"><div class="mark"></div><div><h1>Price-Action Pattern Scanner</h1><div class="sub">distinct Forward-Vol-Scanner module · daily US charts</div></div><nav><button id="theme">◐ Night</button><a href="/">Index desk</a><a href="/stocks">Stock Radar</a><a href="/equity">Equity LEAPS</a><a href="/value-puts">Value Puts</a><a href="/research">Research</a></nav></div></header>
+ <main><section class="controls">
+ <div><label>Data</label><select id="source"><option value="yf">Yahoo daily</option><option value="mock">Practice</option></select></div>
+ <div><label>Optional tickers</label><input id="tickers" placeholder="Blank = full universe; or AAPL,MSFT,NVDA"></div>
+diff --git a/static/value_puts.html b/static/value_puts.html
+index a26d984..e92e241 100644
+--- a/static/value_puts.html
++++ b/static/value_puts.html
+@@ -19,7 +19,7 @@
+ <main class="shell">
+   <header class="top">
+     <div><div class="brand">FVS · ACQUISITION ENGINE</div><h1>Value Entry Put Scanner</h1><p>Acquire quality companies at a reviewed price while being paid to wait.</p></div>
+-    <nav class="nav"><a href="/">Trade desk</a><a href="/stocks">Stock radar</a><a href="/patterns">Patterns</a><a href="/research">Research</a></nav>
++    <nav class="nav"><a href="/">Trade desk</a><a href="/stocks">Stock radar</a><a href="/equity">Equity LEAPS</a><a href="/patterns">Patterns</a><a href="/research">Research</a></nav>
+   </header>
+ 
+   <section class="panel discovery">
+diff --git a/tests/test_equity_leaps.py b/tests/test_equity_leaps.py
+index a06dcc5..fc480f2 100644
+--- a/tests/test_equity_leaps.py
++++ b/tests/test_equity_leaps.py
+@@ -31,10 +31,10 @@ def make_bars(n=300, start=100.0, *, drift=0.0, low_at=None, atr_pct=0.02,
+         if tighten_from is not None and i >= tighten_from:
+             amp = atr_pct * 0.25
+         wiggle = amp * price * (0.5 if i % 2 else -0.5)
+-        bars.append({"d": (date(2025, 1, 1) + timedelta(days=i)).isoformat(),
+-                     "o": price, "h": price + abs(wiggle), "l": price - abs(wiggle),
+-                     "c": price + wiggle * 0.2,
+-                     "v": vol * (0.4 if tighten_from is not None and i >= tighten_from else 1.0)})
++        bars.append({"date": (date(2025, 1, 1) + timedelta(days=i)).isoformat(),
++                     "open": price, "high": price + abs(wiggle),
++                     "low": price - abs(wiggle), "close": price + wiggle * 0.2,
++                     "volume": vol * (0.4 if tighten_from is not None and i >= tighten_from else 1.0)})
+     return bars
+ 
+ 
+@@ -146,7 +146,7 @@ def test_trigger_requires_reclaim_slope_and_volume():
+     bars = make_bars(300, 100.0, low_at=200, tighten_from=240)
+     m = radar_b.base_metrics("TEST", bars)
+     m.sma50, m.sma50_slope, m.price = 50.0, 0.01, 55.0
+-    bars[-1]["v"] = bars[-2]["v"] * 5
++    bars[-1]["volume"] = bars[-2]["volume"] * 5
+     t = radar_b.trigger(m, bars)
+     assert t["fired"] is True
+ 
+@@ -158,7 +158,7 @@ def test_trigger_blocked_by_earnings():
+     bars = make_bars(300, 100.0, low_at=200, tighten_from=240)
+     m = radar_b.base_metrics("TEST", bars)
+     m.sma50, m.sma50_slope, m.price = 50.0, 0.01, 55.0
+-    bars[-1]["v"] = bars[-2]["v"] * 5
++    bars[-1]["volume"] = bars[-2]["volume"] * 5
+     today = date(2026, 8, 14)
+     t = radar_b.trigger(m, bars, earnings=today + timedelta(days=2), today=today)
+     assert t["fired"] is False
+@@ -204,8 +204,8 @@ def test_extrinsic_is_zero_deep_itm():
+ # ---------------------------------------------------------------- gate E --
+ def test_downtrend_blocks_everything():
+     ctx = make_ctx(regime={"trend": "down", "bias": -1, "adx": 30,
+-                           "iv30": 0.319, "rv21": 0.512, "iv_pctl": 0.39})
+-    out = gate_e.select(ctx)
++                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
++    out = gate_e.select(ctx, bars=make_bars(300, 130.0, low_at=250))
+     assert out["eligible"] is False
+     assert any("TREND BLOCK" in b for b in out["blocks"])
+     assert out["action"] == "STAND ASIDE"
+@@ -213,7 +213,7 @@ def test_downtrend_blocks_everything():
+ 
+ def test_iv_below_rv_blocks_premium_selling():
+     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
+-                           "iv30": 0.30, "rv21": 0.50, "iv_pctl": 0.80})
++                           "iv30": 30.0, "rv21": 50.0, "iv_pctl": 80.0})
+     out = gate_e.select(ctx)
+     assert any("PREMIUM-SELLING BLOCK" in b for b in out["blocks"])
+     assert not set(out["structures"]) & gate_e.SHORT_PREMIUM
+@@ -222,40 +222,40 @@ def test_iv_below_rv_blocks_premium_selling():
+ 
+ def test_uptrend_cheap_vol_picks_long_premium():
+     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
+-                           "iv30": 0.25, "rv21": 0.24, "iv_pctl": 0.20})
+-    out = gate_e.select(ctx)
++                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
++    out = gate_e.select(ctx, bars=make_bars(300, 60.0, drift=0.0025))
+     assert out["eligible"] is True
+     assert out["structures"][0] in gate_e.LONG_PREMIUM
+ 
+ 
+ def test_basing_without_trigger_is_watchlist_only():
+     ctx = make_ctx(regime={"trend": "flat", "bias": 0, "adx": 15,
+-                           "iv30": 0.30, "rv21": 0.28, "iv_pctl": 0.40})
+-    out = gate_e.select(ctx, trigger_fired=False)
++                           "iv30": 30.0, "rv21": 28.0, "iv_pctl": 40.0})
++    out = gate_e.select(ctx, trigger_fired=False, trend_state=0)
+     assert out["eligible"] is False
+     assert any("TRIGGER BLOCK" in b for b in out["blocks"])
+ 
+ 
+ def test_basing_with_trigger_allows_defined_risk():
+     ctx = make_ctx(regime={"trend": "flat", "bias": 0, "adx": 15,
+-                           "iv30": 0.30, "rv21": 0.28, "iv_pctl": 0.40})
+-    out = gate_e.select(ctx, trigger_fired=True)
++                           "iv30": 30.0, "rv21": 28.0, "iv_pctl": 40.0})
++    out = gate_e.select(ctx, trigger_fired=True, trend_state=0)
+     assert out["eligible"] is True
+     assert "debit_spread" in out["structures"]
+ 
+ 
+ def test_build_attaches_suggestions():
+     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
+-                           "iv30": 0.25, "rv21": 0.24, "iv_pctl": 0.20})
+-    out = gate_e.build(ctx, hold="long")
++                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
++    out = gate_e.build(ctx, hold="long", trend_state=1)
+     assert "suggestions" in out
+ 
+ 
+ # ----------------------------------------------------------------- cards --
+ def test_blocked_card_names_gate_and_clearing_condition():
+     ctx = make_ctx(regime={"trend": "down", "bias": -1, "adx": 30,
+-                           "iv30": 0.319, "rv21": 0.512, "iv_pctl": 0.39})
+-    card = cards_e.render(gate_e.build(ctx))
++                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
++    card = cards_e.render(gate_e.build(ctx, bars=make_bars(300, 130.0, low_at=250)))
+     flags = " ".join(card["sections"]["FLAGS"])
+     assert "TREND BLOCK" in flags
+     assert "PREMIUM-SELLING BLOCK" in flags
+@@ -264,13 +264,78 @@ def test_blocked_card_names_gate_and_clearing_condition():
+ 
+ def test_card_format_rules_hold():
+     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
+-                           "iv30": 0.25, "rv21": 0.24, "iv_pctl": 0.20})
+-    card = cards_e.render(gate_e.build(ctx, hold="long"))
++                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
++    card = cards_e.render(gate_e.build(ctx, hold="long", trend_state=1))
+     assert cards_e.validate(card) == []
+ 
+ 
+ def test_card_text_renders():
+     ctx = make_ctx(regime={"trend": "down", "bias": -1, "adx": 30,
+-                           "iv30": 0.319, "rv21": 0.512, "iv_pctl": 0.39})
+-    text = cards_e.to_text(cards_e.render(gate_e.build(ctx)))
++                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
++    text = cards_e.to_text(cards_e.render(gate_e.build(ctx, bars=make_bars(300, 130.0, low_at=250))))
+     assert "ACTION:" in text and "FLAGS" in text
++
++
++# ------------------------------------------------- regressions (v2 fixes) --
++def test_bar_keys_match_histories_yf():
++    """histories_yf emits open/high/low/close/volume, not o/h/l/c/v."""
++    bars = make_bars(300, 100.0, low_at=200, tighten_from=240)
++    assert set(bars[0]) >= {"open", "high", "low", "close", "volume"}
++    assert radar_b.base_metrics("TEST", bars).ok
++
++
++def test_stage_ignores_short_horizon_regime_trend():
++    """A multi-day bounce must not read as Stage 2 while structure is broken."""
++    bars = make_bars(300, 100.0, low_at=250)          # deep decline, weak bounce
++    label, code = gate_e.stage_from_bars(bars)
++    assert code == -1, label
++
++    ctx = make_ctx(regime={"trend": "UP", "bias": 2, "adx": 30,
++                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
++    out = gate_e.select(ctx, bars=bars)
++    assert out["eligible"] is False
++    assert any("TREND BLOCK" in b for b in out["blocks"])
++
++
++def test_stage_without_bars_never_claims_stage_two():
++    ctx = make_ctx(regime={"trend": "UP", "bias": 2, "adx": 30,
++                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
++    out = gate_e.select(ctx)
++    assert out["stage_code"] == 0
++
++
++def test_iv_rv_read_as_percent_not_decimal():
++    """core.regime stores iv30/rv21 as percent (32.90), not decimals."""
++    ctx = make_ctx(regime={"trend": "UP", "bias": 1, "adx": 28,
++                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
++    out = gate_e.select(ctx)
++    assert 0.6 < out["inputs"]["iv_rv"] < 0.7
++    flags = " ".join(out["blocks"])
++    assert "3290" not in flags and "32.9%" in flags
++
++
++def test_long_hold_blocks_when_surface_has_no_leaps():
++    """SCAN_DTE caps the default yf context at 85 DTE; a months hold must not
++    silently return a four-week structure."""
++    ctx = make_ctx(dte=45)
++    ctx.slices = [ctx.slices[0]]
++    bars = make_bars(300, 100.0, drift=0.001)
++    out = gate_e.select(ctx, hold="long", bars=bars)
++    assert any("TENOR BLOCK" in b for b in out["blocks"])
++    assert out["structures"] == []
++
++
++def test_action_matches_rendered_structure():
++    ctx = make_ctx(regime={"trend": "UP", "bias": 1, "adx": 28,
++                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
++    out = gate_e.build(ctx, hold="long", trend_state=1)
++    if out["suggestions"]:
++        assert out["action"] == out["suggestions"][0]["strategy"].upper()
++    else:
++        assert out["action"] == "STAND ASIDE"
++
++
++def test_equity_context_windows():
++    from selection.equity_context import window_for
++    assert window_for("long")[1] > 400
++    assert window_for("short")[1] < 90
+diff --git a/webapp.py b/webapp.py
+index b6cacb2..66ce1f0 100644
+--- a/webapp.py
++++ b/webapp.py
+@@ -184,6 +184,11 @@ def value_put_scanner_page():
+     return send_from_directory("static", "value_puts.html")
+ 
+ 
++@app.get("/equity", strict_slashes=False)
++def page_equity():
++    return send_from_directory("static", "equity_leaps.html")
++
++
+ @app.get("/x4", strict_slashes=False)
+ def x4_page():
+     return send_from_directory("static", "x4.html")
+@@ -411,9 +416,8 @@ def api_equity_gate_e():
+     mode:   auto | yf | mock
+     trigger: 1 to declare the reclaim trigger already fired
+     """
+-    from core.chain import MOCK
+-    from core.yf_client import build_context_yf
+     from selection import cards_e, gate_e
++    from selection.equity_context import build as build_equity
+ 
+     symbol = request.args.get("symbol", "").upper().strip()
+     if not symbol:
+@@ -424,23 +428,15 @@ def api_equity_gate_e():
+     mode = request.args.get("mode", "auto").lower()
+     fired = request.args.get("trigger", "0") in ("1", "true", "yes")
+ 
+-    errors, ctx = [], None
+-    order = {"yf": ["yf"], "mock": ["mock"], "auto": ["yf", "mock"]}.get(mode)
+-    if order is None:
+-        return jsonify({"error": f"bad mode '{mode}'"}), 400
+-    for m in order:
+-        if m == "mock" and symbol not in MOCK:
+-            errors.append("mock: no synthetic surface for symbol")
+-            continue
+-        try:
+-            ctx = build_context_yf(symbol) if m == "yf" else build_context(symbol, m)
+-            break
+-        except Exception as e:                       # noqa: BLE001
+-            errors.append(f"{m}: {type(e).__name__}: {e}")
++    errors, ctx, bars = [], None, []
++    try:
++        ctx, bars = build_equity(symbol, hold)
++    except Exception as e:                           # noqa: BLE001
++        errors.append(f"yf: {type(e).__name__}: {e}")
+     if ctx is None:
+-        return jsonify({"error": "no data source available", "errors": errors}), 502
++        return jsonify({"error": "no usable chain for this hold", "errors": errors}), 502
+ 
+-    payload = gate_e.build(ctx, hold, trigger_fired=fired)
++    payload = gate_e.build(ctx, hold, trigger_fired=fired, bars=bars)
+     payload["card"] = cards_e.render(payload)
+     payload["errors"] = errors
+     return jsonify(payload)
+diff --git a/weekend_card.py b/weekend_card.py
+index 5cf423e..517a4a8 100644
+--- a/weekend_card.py
++++ b/weekend_card.py
+@@ -61,9 +61,10 @@ def run(symbols: list[str] | None = None, limit: int = 5,
+ 
+         card, payload = None, None
+         try:
+-            from core.yf_client import build_context_yf
+-            ctx = build_context_yf(symbol)
+-            payload = gate_e.build(ctx, "long", trigger_fired=trig["fired"])
++            from selection.equity_context import build as build_equity
++            ctx, ctx_bars = build_equity(symbol, "long")
++            payload = gate_e.build(ctx, "long", trigger_fired=trig["fired"],
++                                   bars=ctx_bars or bars[symbol])
+             card = cards_e.render(payload,
+                                   radar={"reasons": row["reasons"]},
+                                   trigger=trig)
+-- 
+2.43.0

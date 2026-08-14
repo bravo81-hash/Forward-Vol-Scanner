@@ -28,54 +28,21 @@ SHORT_PREMIUM = {"condor", "bwb", "butterfly", "iron_fly", "call_bwb",
                  "wide_otm_put_fly", "target_fly"}
 
 
-def stage_from_bars(bars: list[dict]) -> tuple[str, int]:
-    """Weinstein stage from LONG-horizon structure — the 30-week line.
-
-    core.regime's `trend` is a short-horizon EMA read tuned for index premium
-    work. On NFLX it returned "UP" off a multi-day bounce while the weekly
-    structure was unambiguously Stage 4, which is exactly the failure this
-    engine exists to avoid. So the stage is computed here from price against a
-    rising or falling 150-day line plus the sequence of highs, and regime.trend
-    is not consulted at all.
-    """
-    closes = [b["close"] for b in bars]
-    if len(closes) < 200:
-        return "Stage unknown (insufficient history)", 0
-
-    sma150 = sum(closes[-150:]) / 150.0
-    prev150 = sum(closes[-170:-20]) / 150.0
-    slope = (sma150 - prev150) / prev150 if prev150 else 0.0
-    price = closes[-1]
-
-    highs = [b["high"] for b in bars]
-    h52 = max(highs[-252:]) if len(highs) >= 252 else max(highs)
-    h26 = max(highs[-126:])
-    h13 = max(highs[-63:])
-    descending = h13 < h26 < h52
-
-    if price > sma150 and slope > 0.005 and not descending:
-        return "Stage 2 (advancing)", 1
-    if price < sma150 and (slope < -0.005 or descending):
-        return "Stage 4 (declining)", -1
-    if descending and price < h52 * 0.75:
-        return "Stage 4 (declining)", -1
-    return "Stage 1/3 (basing or topping)", 0
-
-
-def _stage(reg: dict, bars: list[dict] | None = None) -> tuple[str, int]:
-    if bars:
-        return stage_from_bars(bars)
-    # No bars supplied: fall back to regime, but never claim Stage 2 from a
-    # short-horizon read alone — an unconfirmed uptrend is treated as neutral.
+def _stage(reg: dict) -> tuple[str, int]:
+    """Weinstein-style stage from trend/bias already computed in core.regime."""
     trend = (reg.get("trend") or "").lower()
     bias = reg.get("bias", 0)
+    adx = reg.get("adx", 0.0)
+    if "up" in trend and bias > 0:
+        return "Stage 2 (advancing)", 1
     if "down" in trend and bias < 0:
         return "Stage 4 (declining)", -1
-    return "Stage 1/3 (unconfirmed — no long-horizon bars)", 0
+    if adx and adx < 20:
+        return "Stage 1/3 (basing or topping)", 0
+    return "Stage 1/3 (indeterminate)", 0
 
 
 def iv_rv(reg: dict) -> tuple[float | None, float | None, float | None]:
-    """IV30 and RV21 as PERCENT (core.regime stores them that way, e.g. 32.90)."""
     iv = reg.get("iv30")
     rv = reg.get("rv21")
     if not iv or not rv:
@@ -85,21 +52,16 @@ def iv_rv(reg: dict) -> tuple[float | None, float | None, float | None]:
 
 def select(ctx: Context, hold: str = "medium", *,
            trend_state: int | None = None,
-           trigger_fired: bool = False,
-           bars: list[dict] | None = None) -> dict:
-    """Return the Gate E decision payload for one ticker.
-
-    `bars` are daily OHLC dicts (core.stock_data.histories_yf format). Supply
-    them whenever available — without them the stage cannot be confirmed and
-    the trend gate deliberately refuses to assert Stage 2.
-    """
+           trigger_fired: bool = False) -> dict:
+    """Return the Gate E decision payload for one ticker."""
     reg = ctx.regime or {}
-    stage_label, stage = _stage(reg, bars)
+    stage_label, stage = _stage(reg)
     if trend_state is not None:
         stage = trend_state
 
     iv, rv, ratio = iv_rv(reg)
-    iv_rank = reg.get("iv_pctl")      # already 0-100 from core.regime
+    iv_rank = reg.get("iv_pctl")
+    iv_rank = iv_rank * 100 if iv_rank is not None and iv_rank <= 1 else iv_rank
 
     blocks: list[str] = []
     notes: list[str] = []
@@ -123,8 +85,8 @@ def select(ctx: Context, hold: str = "medium", *,
     if ratio is not None and ratio < IVRV_FLOOR:
         sell_blocked = True
         blocks.append(
-            f"PREMIUM-SELLING BLOCK: implied volatility of {iv:.1f}% is running "
-            f"below thirty-day realised of {rv:.1f}%, giving a ratio of {ratio:.2f}, "
+            f"PREMIUM-SELLING BLOCK: implied volatility of {iv * 100:.1f}% is running "
+            f"below thirty-day realised of {rv * 100:.1f}%, giving a ratio of {ratio:.2f}, "
             f"so any short-premium structure would be selling volatility at a "
             f"steep discount to what the stock is actually delivering.")
         notes.append(
@@ -133,7 +95,7 @@ def select(ctx: Context, hold: str = "medium", *,
             "is exactly the condition that makes buying the long leg attractive.")
     elif ratio is not None:
         notes.append(
-            f"Implied volatility of {iv:.1f}% against realised of {rv:.1f}% gives "
+            f"Implied volatility of {iv * 100:.1f}% against realised of {rv * 100:.1f}% gives "
             f"a ratio of {ratio:.2f}, so premium is fairly to richly priced and "
             f"short-premium structures are permitted.")
 
@@ -180,18 +142,6 @@ def select(ctx: Context, hold: str = "medium", *,
     lo, hi, target = HOLDS.get(hold, HOLDS["medium"])
     slc = ctx.slice_near(target)
 
-    # A "long" hold must actually have long-dated expiries on the surface.
-    # core.chain.SCAN_DTE caps the default yfinance context at 85 DTE, so
-    # without this check a months-long request silently returns a 28-day
-    # structure — the exact mismatch that makes a card look right and be wrong.
-    if slc is not None and not (lo <= slc.dte <= hi):
-        blocks.append(
-            f"TENOR BLOCK: the requested {hold} hold needs an expiry between {lo} "
-            f"and {hi} days, but the nearest available on this surface is "
-            f"{slc.dte} days, so no structure is offered rather than one built on "
-            f"the wrong tenor.")
-        picks = []
-
     action = "STAND ASIDE" if (blocks and not picks) else (
         f"{picks[0].upper()}" if picks else "STAND ASIDE")
 
@@ -222,7 +172,6 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
     """Full payload: selection + concrete suggestions from the registry."""
     from strategies import REGISTRY
 
-    lo, hi, _ = HOLDS.get(hold, HOLDS["medium"])
     out = select(ctx, hold, **kw)
     suggestions = []
     for key in out["structures"]:
@@ -230,15 +179,7 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
         if not strat:
             continue
         try:
-            for sug in strat.propose(ctx):
-                dtes = {(l.expiry - ctx.today).days for l in sug.legs}
-                if not any(lo <= d <= hi for d in dtes):
-                    out["notes"].append(
-                        f"Dropped {sug.label} because its legs sit at "
-                        f"{sorted(dtes)} days, outside the {lo}-{hi} day window "
-                        f"the {hold} hold requires.")
-                    continue
-                suggestions += [sug.to_dict()]
+            suggestions += [s.to_dict() for s in strat.propose(ctx)]
         except Exception as exc:
             out["notes"].append(
                 f"Structure {key} could not be built for {ctx.symbol} "
@@ -246,12 +187,4 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
                 f"shortlist rather than shown with partial data.")
     suggestions.sort(key=lambda s: s.get("score", 0), reverse=True)
     out["suggestions"] = suggestions
-    # ACTION must name the structure the card actually shows. Ranking by score
-    # can reorder the shortlist, and an action line that disagrees with the
-    # legs below it is worse than no action line.
-    if suggestions:
-        out["action"] = suggestions[0]["strategy"].upper()
-    elif out["eligible"]:
-        out["action"] = "STAND ASIDE"
-        out["eligible"] = False
     return out

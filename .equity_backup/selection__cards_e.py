@@ -75,8 +75,8 @@ def render(gate_e: dict, *, radar: dict | None = None,
             f"structure, which is what gates the direction of any structure below.")
         if i.get("iv_rv") is not None:
             sections["SETUP"].append(
-                f"Implied volatility sits at {i['iv30']:.1f}% against realised of "
-                f"{i['rv21']:.1f}%, a ratio of {i['iv_rv']:.2f}, which decides whether "
+                f"Implied volatility sits at {i['iv30'] * 100:.1f}% against realised of "
+                f"{i['rv21'] * 100:.1f}%, a ratio of {i['iv_rv']:.2f}, which decides whether "
                 f"this is a name to buy premium on or sell it on.")
 
     # ---------------------------------------------------------- STRUCTURE

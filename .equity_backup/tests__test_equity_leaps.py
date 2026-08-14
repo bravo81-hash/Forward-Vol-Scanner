@@ -31,10 +31,10 @@ def make_bars(n=300, start=100.0, *, drift=0.0, low_at=None, atr_pct=0.02,
         if tighten_from is not None and i >= tighten_from:
             amp = atr_pct * 0.25
         wiggle = amp * price * (0.5 if i % 2 else -0.5)
-        bars.append({"date": (date(2025, 1, 1) + timedelta(days=i)).isoformat(),
-                     "open": price, "high": price + abs(wiggle),
-                     "low": price - abs(wiggle), "close": price + wiggle * 0.2,
-                     "volume": vol * (0.4 if tighten_from is not None and i >= tighten_from else 1.0)})
+        bars.append({"d": (date(2025, 1, 1) + timedelta(days=i)).isoformat(),
+                     "o": price, "h": price + abs(wiggle), "l": price - abs(wiggle),
+                     "c": price + wiggle * 0.2,
+                     "v": vol * (0.4 if tighten_from is not None and i >= tighten_from else 1.0)})
     return bars
 
 
@@ -146,7 +146,7 @@ def test_trigger_requires_reclaim_slope_and_volume():
     bars = make_bars(300, 100.0, low_at=200, tighten_from=240)
     m = radar_b.base_metrics("TEST", bars)
     m.sma50, m.sma50_slope, m.price = 50.0, 0.01, 55.0
-    bars[-1]["volume"] = bars[-2]["volume"] * 5
+    bars[-1]["v"] = bars[-2]["v"] * 5
     t = radar_b.trigger(m, bars)
     assert t["fired"] is True
 
@@ -158,7 +158,7 @@ def test_trigger_blocked_by_earnings():
     bars = make_bars(300, 100.0, low_at=200, tighten_from=240)
     m = radar_b.base_metrics("TEST", bars)
     m.sma50, m.sma50_slope, m.price = 50.0, 0.01, 55.0
-    bars[-1]["volume"] = bars[-2]["volume"] * 5
+    bars[-1]["v"] = bars[-2]["v"] * 5
     today = date(2026, 8, 14)
     t = radar_b.trigger(m, bars, earnings=today + timedelta(days=2), today=today)
     assert t["fired"] is False
@@ -204,8 +204,8 @@ def test_extrinsic_is_zero_deep_itm():
 # ---------------------------------------------------------------- gate E --
 def test_downtrend_blocks_everything():
     ctx = make_ctx(regime={"trend": "down", "bias": -1, "adx": 30,
-                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
-    out = gate_e.select(ctx, bars=make_bars(300, 130.0, low_at=250))
+                           "iv30": 0.319, "rv21": 0.512, "iv_pctl": 0.39})
+    out = gate_e.select(ctx)
     assert out["eligible"] is False
     assert any("TREND BLOCK" in b for b in out["blocks"])
     assert out["action"] == "STAND ASIDE"
@@ -213,7 +213,7 @@ def test_downtrend_blocks_everything():
 
 def test_iv_below_rv_blocks_premium_selling():
     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
-                           "iv30": 30.0, "rv21": 50.0, "iv_pctl": 80.0})
+                           "iv30": 0.30, "rv21": 0.50, "iv_pctl": 0.80})
     out = gate_e.select(ctx)
     assert any("PREMIUM-SELLING BLOCK" in b for b in out["blocks"])
     assert not set(out["structures"]) & gate_e.SHORT_PREMIUM
@@ -222,40 +222,40 @@ def test_iv_below_rv_blocks_premium_selling():
 
 def test_uptrend_cheap_vol_picks_long_premium():
     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
-                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
-    out = gate_e.select(ctx, bars=make_bars(300, 60.0, drift=0.0025))
+                           "iv30": 0.25, "rv21": 0.24, "iv_pctl": 0.20})
+    out = gate_e.select(ctx)
     assert out["eligible"] is True
     assert out["structures"][0] in gate_e.LONG_PREMIUM
 
 
 def test_basing_without_trigger_is_watchlist_only():
     ctx = make_ctx(regime={"trend": "flat", "bias": 0, "adx": 15,
-                           "iv30": 30.0, "rv21": 28.0, "iv_pctl": 40.0})
-    out = gate_e.select(ctx, trigger_fired=False, trend_state=0)
+                           "iv30": 0.30, "rv21": 0.28, "iv_pctl": 0.40})
+    out = gate_e.select(ctx, trigger_fired=False)
     assert out["eligible"] is False
     assert any("TRIGGER BLOCK" in b for b in out["blocks"])
 
 
 def test_basing_with_trigger_allows_defined_risk():
     ctx = make_ctx(regime={"trend": "flat", "bias": 0, "adx": 15,
-                           "iv30": 30.0, "rv21": 28.0, "iv_pctl": 40.0})
-    out = gate_e.select(ctx, trigger_fired=True, trend_state=0)
+                           "iv30": 0.30, "rv21": 0.28, "iv_pctl": 0.40})
+    out = gate_e.select(ctx, trigger_fired=True)
     assert out["eligible"] is True
     assert "debit_spread" in out["structures"]
 
 
 def test_build_attaches_suggestions():
     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
-                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
-    out = gate_e.build(ctx, hold="long", trend_state=1)
+                           "iv30": 0.25, "rv21": 0.24, "iv_pctl": 0.20})
+    out = gate_e.build(ctx, hold="long")
     assert "suggestions" in out
 
 
 # ----------------------------------------------------------------- cards --
 def test_blocked_card_names_gate_and_clearing_condition():
     ctx = make_ctx(regime={"trend": "down", "bias": -1, "adx": 30,
-                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
-    card = cards_e.render(gate_e.build(ctx, bars=make_bars(300, 130.0, low_at=250)))
+                           "iv30": 0.319, "rv21": 0.512, "iv_pctl": 0.39})
+    card = cards_e.render(gate_e.build(ctx))
     flags = " ".join(card["sections"]["FLAGS"])
     assert "TREND BLOCK" in flags
     assert "PREMIUM-SELLING BLOCK" in flags
@@ -264,78 +264,13 @@ def test_blocked_card_names_gate_and_clearing_condition():
 
 def test_card_format_rules_hold():
     ctx = make_ctx(regime={"trend": "up", "bias": 1, "adx": 28,
-                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
-    card = cards_e.render(gate_e.build(ctx, hold="long", trend_state=1))
+                           "iv30": 0.25, "rv21": 0.24, "iv_pctl": 0.20})
+    card = cards_e.render(gate_e.build(ctx, hold="long"))
     assert cards_e.validate(card) == []
 
 
 def test_card_text_renders():
     ctx = make_ctx(regime={"trend": "down", "bias": -1, "adx": 30,
-                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
-    text = cards_e.to_text(cards_e.render(gate_e.build(ctx, bars=make_bars(300, 130.0, low_at=250))))
+                           "iv30": 0.319, "rv21": 0.512, "iv_pctl": 0.39})
+    text = cards_e.to_text(cards_e.render(gate_e.build(ctx)))
     assert "ACTION:" in text and "FLAGS" in text
-
-
-# ------------------------------------------------- regressions (v2 fixes) --
-def test_bar_keys_match_histories_yf():
-    """histories_yf emits open/high/low/close/volume, not o/h/l/c/v."""
-    bars = make_bars(300, 100.0, low_at=200, tighten_from=240)
-    assert set(bars[0]) >= {"open", "high", "low", "close", "volume"}
-    assert radar_b.base_metrics("TEST", bars).ok
-
-
-def test_stage_ignores_short_horizon_regime_trend():
-    """A multi-day bounce must not read as Stage 2 while structure is broken."""
-    bars = make_bars(300, 100.0, low_at=250)          # deep decline, weak bounce
-    label, code = gate_e.stage_from_bars(bars)
-    assert code == -1, label
-
-    ctx = make_ctx(regime={"trend": "UP", "bias": 2, "adx": 30,
-                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
-    out = gate_e.select(ctx, bars=bars)
-    assert out["eligible"] is False
-    assert any("TREND BLOCK" in b for b in out["blocks"])
-
-
-def test_stage_without_bars_never_claims_stage_two():
-    ctx = make_ctx(regime={"trend": "UP", "bias": 2, "adx": 30,
-                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
-    out = gate_e.select(ctx)
-    assert out["stage_code"] == 0
-
-
-def test_iv_rv_read_as_percent_not_decimal():
-    """core.regime stores iv30/rv21 as percent (32.90), not decimals."""
-    ctx = make_ctx(regime={"trend": "UP", "bias": 1, "adx": 28,
-                           "iv30": 32.9, "rv21": 51.2, "iv_pctl": 39.0})
-    out = gate_e.select(ctx)
-    assert 0.6 < out["inputs"]["iv_rv"] < 0.7
-    flags = " ".join(out["blocks"])
-    assert "3290" not in flags and "32.9%" in flags
-
-
-def test_long_hold_blocks_when_surface_has_no_leaps():
-    """SCAN_DTE caps the default yf context at 85 DTE; a months hold must not
-    silently return a four-week structure."""
-    ctx = make_ctx(dte=45)
-    ctx.slices = [ctx.slices[0]]
-    bars = make_bars(300, 100.0, drift=0.001)
-    out = gate_e.select(ctx, hold="long", bars=bars)
-    assert any("TENOR BLOCK" in b for b in out["blocks"])
-    assert out["structures"] == []
-
-
-def test_action_matches_rendered_structure():
-    ctx = make_ctx(regime={"trend": "UP", "bias": 1, "adx": 28,
-                           "iv30": 25.0, "rv21": 24.0, "iv_pctl": 20.0})
-    out = gate_e.build(ctx, hold="long", trend_state=1)
-    if out["suggestions"]:
-        assert out["action"] == out["suggestions"][0]["strategy"].upper()
-    else:
-        assert out["action"] == "STAND ASIDE"
-
-
-def test_equity_context_windows():
-    from selection.equity_context import window_for
-    assert window_for("long")[1] > 400
-    assert window_for("short")[1] < 90

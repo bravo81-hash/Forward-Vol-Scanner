@@ -84,7 +84,14 @@ def _slice_from_chain(expiry: date, dte: int, spot: float, calls, puts,
                  atm_spread_pct=round(spread, 3), oi_atm=oi)
 
 
-def build_context_yf(symbol: str, today: date | None = None) -> Context:
+def build_context_yf(symbol: str, today: date | None = None,
+                     dte_range: tuple[int, int] | None = None) -> Context:
+    """Build a Context from yfinance.
+
+    dte_range overrides SCAN_DTE. The default (5, 85) is right for index
+    premium work but excludes every LEAPS expiry, so single-name months-long
+    structures must pass a wider window explicitly.
+    """
     try:
         import yfinance as yf
     except ImportError as e:
@@ -92,6 +99,7 @@ def build_context_yf(symbol: str, today: date | None = None) -> Context:
 
     today = today or trading_today()
     symbol = symbol.upper()
+    window = dte_range or SCAN_DTE
     fetch = PROXY.get(symbol, symbol)
     qdiv = q_for(symbol)
     tk = yf.Ticker(fetch)
@@ -108,7 +116,7 @@ def build_context_yf(symbol: str, today: date | None = None) -> Context:
     for exp in (tk.options or []):
         d = datetime.strptime(exp, "%Y-%m-%d").date()
         dte = (d - today).days
-        if not SCAN_DTE[0] <= dte <= SCAN_DTE[1]:
+        if not window[0] <= dte <= window[1]:
             continue
         try:
             ch = tk.option_chain(exp)
@@ -117,11 +125,12 @@ def build_context_yf(symbol: str, today: date | None = None) -> Context:
             s = None
         if s:
             slices.append(s)
-        if len(slices) >= MAX_EXPIRIES:
+        if len(slices) >= (MAX_EXPIRIES if window == SCAN_DTE
+                           else MAX_EXPIRIES * 2):
             break
     if len(slices) < 2:
         raise RuntimeError(f"yfinance: usable chain too thin for {fetch} "
-                           f"({len(slices)} expiries in {SCAN_DTE} DTE)")
+                           f"({len(slices)} expiries in {window} DTE)")
     slices.sort(key=lambda s: s.dte)
     iv30 = iv_cm(slices, 30) * 100
 
