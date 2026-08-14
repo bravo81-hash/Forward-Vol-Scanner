@@ -587,3 +587,49 @@ def test_degraded_solve_reports_what_it_evaluated():
     ctx.strikes = [210.0, 225.0]
     s = Zebra().propose(ctx)[0]
     assert any("Closest strikes the solver could reach" in r for r in s.rationale)
+
+
+# ------------------------------ regressions (v8, degenerate delta deep ITM) --
+def test_leg_iv_never_degenerate():
+    """NVDA reported a 100-delta long leg carrying $17.78 of time value.
+    iv_at extrapolates 1.6x past the 25-delta wings; deep ITM that reached
+    zero, and bs_greeks short-circuits to delta 1.00 for a zero-vol ITM call."""
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    s = Zebra().propose(ctx)[0]
+    for leg in s.legs:
+        assert leg.iv > 0.02, f"{leg.strike} carries iv={leg.iv}"
+        assert leg.iv < 3.0
+
+
+def test_deep_itm_delta_is_not_exactly_one():
+    from core.pricing import bs_greeks
+    from strategies.zebra import curve_iv
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    slc = ctx.slices[-1]
+    d = bs_greeks(ctx.spot, 180.0, 307 / 365, curve_iv(ctx, slc, 180.0), "C")["delta"]
+    assert 0.60 < d < 0.99, d
+
+
+def test_extrinsic_and_delta_are_consistent():
+    """A strike with material time value cannot also be 100 delta."""
+    from strategies.zebra import curve_iv, extrinsic
+    from core.pricing import bs_greeks
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    slc, t = ctx.slices[-1], 307 / 365
+    for k in (170.0, 180.0, 195.0, 210.0):
+        iv = curve_iv(ctx, slc, k)
+        ex = extrinsic(ctx.spot, k, t, iv)
+        d = bs_greeks(ctx.spot, k, t, iv, "C")["delta"]
+        if ex > 1.0:
+            assert d < 0.995, f"strike {k}: extrinsic {ex:.2f} but delta {d:.3f}"
+
+
+def test_iv_clamp_rejects_negative_extrapolation():
+    from strategies.zebra import _clamp
+    assert _clamp(-0.1) == 0.02
+    assert _clamp(0.0) == 0.02
+    assert _clamp(9.9) == 3.0
+    assert _clamp(0.35) == 0.35

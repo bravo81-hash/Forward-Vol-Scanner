@@ -37,6 +37,9 @@ button:disabled{opacity:.5;cursor:default}
 .action{margin-left:auto;font:700 13px inherit;letter-spacing:.1em;
         padding:5px 12px;border-radius:5px;background:#16324b;color:var(--accent)}
 .action.aside{background:#3a1f28;color:var(--bad)}
+.src{font-size:10px;letter-spacing:.1em;padding:3px 8px;border-radius:4px;
+     background:#1a2233;color:var(--dim);text-transform:uppercase}
+.src.live{background:#1d3524;color:var(--good)}
 h3{font:600 10px/1 inherit;letter-spacing:.18em;text-transform:uppercase;
    color:var(--dim);margin:16px 0 7px}
 ul{margin:0;padding-left:18px}
@@ -74,6 +77,12 @@ tr.pick:hover{background:#16203010}
       </select></div>
     <div><label>Trigger fired</label>
       <select id="trig"><option value="0">No</option><option value="1">Yes</option></select></div>
+    <div><label>Data</label>
+      <select id="src">
+        <option value="auto" selected>Auto · TWS then yfinance</option>
+        <option value="live">TWS only</option>
+        <option value="yf">yfinance only</option>
+      </select></div>
     <button id="go">Analyse</button>
     <button id="radar" class="ghost">Run Radar-B</button>
   </div>
@@ -90,7 +99,7 @@ function bullets(items, cls){
   return `<ul class="${cls||''}">` + items.map(b=>`<li>${esc(b)}</li>`).join('') + '</ul>';
 }
 
-function renderCard(card){
+function renderCard(card, badge){
   const h = card.header || {};
   const aside = /STAND ASIDE/.test(card.action||'');
   const order = ['SETUP','STRUCTURE','ENTRY','EXIT','MANAGE','FLAGS'];
@@ -101,6 +110,7 @@ function renderCard(card){
       <div class="chead">
         <span class="sym">${esc(h.symbol||'')}</span>
         <span class="meta">$${(h.spot||0).toFixed(2)} · ${esc(h.meta||'')}</span>
+        ${badge||''}
         <span class="action ${aside?'aside':''}">${esc(card.action||'')}</span>
       </div>${secs}</div>`;
 }
@@ -111,11 +121,15 @@ async function analyse(){
   $('#out').innerHTML = '<p class="spin">Fetching chain and computing stage…</p>';
   try{
     const r = await fetch(`/api/equity/gate-e?symbol=${encodeURIComponent(sym)}`
-      + `&hold=${$('#hold').value}&trigger=${$('#trig').value}`);
+      + `&hold=${$('#hold').value}&trigger=${$('#trig').value}`
+      + `&source=${$('#src').value}`);
     const j = await r.json();
     if(!r.ok){ $('#out').innerHTML = `<p class="err">${esc(j.error||'failed')}<br>`
       + esc((j.errors||[]).join(' · ')) + '</p>'; return; }
-    $('#out').innerHTML = renderCard(j.card);
+    const badge = j.source === 'IBKR TWS'
+      ? '<span class="src live">TWS</span>'
+      : `<span class="src">${esc(j.source||'yfinance')}</span>`;
+    $('#out').innerHTML = renderCard(j.card, badge);
   }catch(e){ $('#out').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 

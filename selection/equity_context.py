@@ -32,6 +32,11 @@ WINDOWS = {"short": (3, 45), "medium": (14, 120), "long": (90, 500)}
 TARGETS = {"short": 14, "medium": 45, "long": 300}
 
 STRIKE_LO, STRIKE_HI = 0.45, 1.35
+# A ZEBRA long leg solves to roughly 0.8x spot, so the live strike band has to
+# reach well past core.chain's default +/-20%.
+LIVE_STRIKE_BAND = (0.45, 1.35)
+
+_LIVE_ERRORS: dict = {}
 MIN_GRID = 8
 
 RETRIES = 3
@@ -114,7 +119,24 @@ def listed_strikes(symbol: str, expiry: date, spot: float) -> list[float]:
     return [k for k in ks if lo <= k <= hi]
 
 
-def build(symbol: str, hold: str = "medium", *, today=None):
+def build_live(symbol: str, hold: str, today: date):
+    """Context from IBKR/TWS. Real quotes, real IV, real strike ladder.
+
+    Everything in core/iv_solve.py exists to work around Yahoo serving
+    placeholder IV on LEAPS. TWS has none of that problem, so when it is
+    reachable this path is strictly better: NBBO bid/ask instead of solved
+    mids, and the option chain definition instead of a scraped table.
+    """
+    from core.context import build_context
+
+    lo, hi = window_for(hold)
+    ctx = build_context(symbol, "live", today=today,
+                        dte_range=(lo, hi), strike_band=LIVE_STRIKE_BAND)
+    ctx.data["chain_source"] = "IBKR TWS"
+    return ctx
+
+
+def build(symbol: str, hold: str = "medium", *, today=None, source: str = "auto"):
     """Return (context, daily bars).
 
     Never raises for a tenor shortfall - builds the widest usable window and
@@ -123,11 +145,25 @@ def build(symbol: str, hold: str = "medium", *, today=None):
     """
     from core.events import trading_today
     from core.stock_data import histories_yf
-    from core.yf_client import build_context_yf
 
     today = today or trading_today()
-    lo, hi = window_for(hold)
 
+    # TWS first when it is reachable. Falling back rather than failing means a
+    # closed TWS degrades the data quality instead of the feature.
+    if source in ("auto", "live"):
+        try:
+            ctx = _cached(("live", symbol, hold),
+                          lambda: build_live(symbol, hold, today))
+            bars = histories_yf([symbol], period="2y").get(symbol, [])
+            ctx.data["strikes_below_spot"] = sum(1 for k in ctx.strikes
+                                                 if k < ctx.spot)
+            return ctx, bars
+        except Exception as exc:                     # noqa: BLE001
+            if source == "live":
+                raise
+            _LIVE_ERRORS[symbol] = "%s: %s" % (type(exc).__name__, exc)
+
+    lo, hi = window_for(hold)
     expiries = probe_expiries(symbol, today)
     in_window = [e for e in expiries if lo <= e[1] <= hi]
     shortfall = None
@@ -174,6 +210,9 @@ def build(symbol: str, hold: str = "medium", *, today=None):
     ctx.data["strikes_below_spot"] = sum(1 for k in ctx.strikes if k < ctx.spot)
     ctx.data["expiries_listed"] = len(expiries)
     ctx.data["chains_fetched"] = len(chosen)
+    ctx.data["chain_source"] = "yfinance"
+    if symbol in _LIVE_ERRORS:
+        ctx.data["live_unavailable"] = _LIVE_ERRORS[symbol]
     return ctx, bars
 
 

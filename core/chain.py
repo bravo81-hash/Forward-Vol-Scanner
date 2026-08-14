@@ -30,6 +30,17 @@ SURFACE_CFG = {   # symbol: (secType, exchange, tradingClass, is_index)
 }
 
 
+def surface_cfg(symbol: str):
+    """Contract spec for any US symbol.
+
+    SURFACE_CFG covers the index and ETF names the forward-vol work uses. Any
+    other ticker is an ordinary SMART-routed stock whose option tradingClass
+    equals its symbol, so an unknown symbol resolves rather than KeyErrors.
+    """
+    return SURFACE_CFG.get(symbol, ("STK", "SMART", symbol, False))
+
+
+
 def k25(spot: float, iv: float, t_yr: float, cp: str,
         r: float = RISK_FREE, q: float = 0.0) -> float:
     """Strike at |delta|~=.25 (Merton): K = S*exp(mu ± z), z=.6745*iv*sqrt(t),
@@ -45,8 +56,15 @@ def k25(spot: float, iv: float, t_yr: float, cp: str,
 def build_chain_live(ib, symbol: str, today: date, *,
                      fallback_spot: float | None = None,
                      fallback_iv: float | None = None,
+                     dte_range: tuple[int, int] | None = None,
+                     strike_band: tuple[float, float] | None = None,
                      diagnostics: dict | None = None) -> tuple[float, list[Slice], list[float]]:
-    cache_key = (symbol, today)
+    # Single-name LEAPS need both a wider tenor window than SCAN_DTE and a
+    # wider strike band than +/-20%: a ZEBRA long leg solves to roughly 0.8x
+    # spot and the search has to reach past it. Defaults are unchanged.
+    window = dte_range or SCAN_DTE
+    band = strike_band or (0.8, 1.2)
+    cache_key = (symbol, today, window, band)
     cached = CHAIN_CACHE.get(cache_key)
     if cached:
         if isinstance(cached, dict):
@@ -56,7 +74,7 @@ def build_chain_live(ib, symbol: str, today: date, *,
         return cached
     diagnostics = diagnostics if diagnostics is not None else {}
     from ib_insync import Index, Option, Stock
-    st, exch, tc, is_idx = SURFACE_CFG[symbol]
+    st, exch, tc, is_idx = surface_cfg(symbol)
     und = (Index(symbol, exch, "USD") if is_idx else Stock(symbol, "SMART", "USD"))
     ib.qualifyContracts(und)
 
@@ -93,9 +111,10 @@ def build_chain_live(ib, symbol: str, today: date, *,
     expiries = []
     for e in sorted(chain.expirations):
         d = datetime.strptime(e, "%Y%m%d").date()
-        if SCAN_DTE[0] <= (d - today).days <= SCAN_DTE[1] and d.weekday() == 4:
+        if window[0] <= (d - today).days <= window[1] and d.weekday() == 4:
             expiries.append(d)            # Fridays only — keeps lines low
-    strikes = sorted(k for k in chain.strikes if 0.8 * spot < k < 1.2 * spot)
+    strikes = sorted(k for k in chain.strikes
+                     if band[0] * spot < k < band[1] * spot)
     if not expiries or not strikes:
         raise RuntimeError(f"{symbol}: no expiries/strikes in scan window "
                            f"(spot {spot:g})")

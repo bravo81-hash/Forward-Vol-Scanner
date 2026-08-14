@@ -633,3 +633,38 @@ def test_iv_clamp_rejects_negative_extrapolation():
     assert _clamp(0.0) == 0.02
     assert _clamp(9.9) == 3.0
     assert _clamp(0.35) == 0.35
+
+
+# ------------------------------------------ regressions (v9, live TWS path) --
+def test_card_declares_its_data_source():
+    ctx = make_ctx(regime={"trend": "UP", "bias": 1, "adx": 28, "iv30": 40.8,
+                           "rv21": 39.7, "iv_pctl": 50.0, "ivp_proxy": True})
+    ctx.data = {"chain_source": "IBKR TWS"}
+    out = gate_e.select(ctx, bars=make_bars(300, 60.0, drift=0.0025))
+    assert any("real NBBO prices" in n for n in out["notes"])
+
+    ctx.data = {"chain_source": "yfinance", "live_unavailable": "ConnectionRefusedError"}
+    out = gate_e.select(ctx, bars=make_bars(300, 60.0, drift=0.0025))
+    assert any("TWS was unreachable" in n for n in out["notes"])
+    assert any("verified in TWS before trading" in n for n in out["notes"])
+
+
+def test_live_strike_band_reaches_past_a_zebra_long_leg():
+    """A ZEBRA long leg solves near 0.8x spot; core.chain's default band is
+    +/-20%, which barely reaches it and leaves nothing to solve over."""
+    from selection.equity_context import LIVE_STRIKE_BAND
+    assert LIVE_STRIKE_BAND[0] <= 0.55
+    assert LIVE_STRIKE_BAND[1] >= 1.25
+
+
+def test_source_live_raises_rather_than_silently_falling_back(monkeypatch):
+    from selection import equity_context as ec
+    ec.clear_cache()
+
+    def boom(*a, **k):
+        raise RuntimeError("TWS refused")
+
+    monkeypatch.setattr(ec, "build_live", boom)
+    with pytest.raises(RuntimeError, match="TWS refused"):
+        ec.build("NVDA", "long", source="live", today=date(2026, 8, 14))
+    ec.clear_cache()

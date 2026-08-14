@@ -198,6 +198,20 @@ def select(ctx: Context, hold: str = "medium", *,
     # core.chain.SCAN_DTE caps the default yfinance context at 85 DTE, so
     # without this check a months-long request silently returns a 28-day
     # structure — the exact mismatch that makes a card look right and be wrong.
+    src = (ctx.data or {}).get("chain_source")
+    if src == "IBKR TWS":
+        notes.append(
+            "Quotes, implied volatility and the strike ladder all came from "
+            "TWS, so these are real NBBO prices rather than solved mids.")
+    elif src == "yfinance":
+        why = (ctx.data or {}).get("live_unavailable")
+        notes.append(
+            "Chain data came from yfinance"
+            + (" because TWS was unreachable (%s)" % why if why else "")
+            + ", so implied volatility on long-dated strikes is solved from "
+              "mid prices rather than quoted, and the numbers should be "
+              "verified in TWS before trading.")
+
     shortfall = (ctx.data or {}).get("tenor_shortfall")
     if shortfall:
         req_lo, req_hi = shortfall["requested"]
