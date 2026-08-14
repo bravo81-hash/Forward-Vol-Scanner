@@ -28,7 +28,6 @@ from .base import Strategy
 
 MIN_DTE, MAX_DTE, TARGET_DTE = 120, 400, 300
 MIN_CANDIDATES = 8          # fewer strikes than this is not a solve
-IV_FLOOR, IV_CEIL = 0.02, 3.0
 DEGRADED_FRAC = 0.10        # net extrinsic above 10% of ATM is not a ZEBRA
 
 
@@ -44,19 +43,11 @@ def curve_iv(ctx, slc, strike: float) -> float:
     if curve:
         exact = curve.get(strike)
         if exact:
-            return _clamp(exact)
+            return exact
         near = min(curve, key=lambda k: abs(k - strike))
         if abs(near - strike) <= max(1.0, strike * 0.02):
-            return _clamp(curve[near])
-    # iv_at extrapolates up to 1.6x beyond the 25-delta wings, which deep ITM
-    # can reach zero or go negative. core.pricing.bs_greeks then short-circuits
-    # to a degenerate delta of exactly 1.00 - which is how a strike carrying
-    # $17.78 of time value reported 100 delta on NVDA.
-    return _clamp(iv_at(slc, strike))
-
-
-def _clamp(iv: float) -> float:
-    return min(max(float(iv), IV_FLOOR), IV_CEIL)
+            return curve[near]
+    return iv_at(slc, strike)
 
 
 def extrinsic(spot: float, strike: float, t: float, iv: float,
@@ -112,23 +103,14 @@ class Zebra(Strategy):
         if long_k >= atm:
             return []
 
-        # Strategy.leg() stamps iv_at() onto the Leg, and every downstream
-        # price, greek and breakeven is computed from that. Deep ITM it is the
-        # wrong number, so the legs are built with the solved curve instead.
-        legs = [Leg(cp="C", strike=long_k, expiry=slc.expiry, qty=+2,
-                    iv=curve_iv(ctx, slc, long_k)),
-                Leg(cp="C", strike=atm, expiry=slc.expiry, qty=-1,
-                    iv=curve_iv(ctx, slc, atm))]
-        if min(l.iv for l in legs) <= IV_FLOOR:
-            return []
+        legs = [self.leg(ctx, slc, "C", long_k, +2),
+                self.leg(ctx, slc, "C", atm, -1)]
         s = self.make(ctx, f"ZEBRA {long_k:g}/{atm:g}C {slc.dte}d", legs,
                       score=0.5, rationale=[], gamma_test=False)
 
         t = max(slc.dte, 1) / 365.0
-        d_long = bs_greeks(ctx.spot, long_k, t, curve_iv(ctx, slc, long_k),
-                           "C", q=ctx.q)["delta"]
-        d_atm = bs_greeks(ctx.spot, atm, t, curve_iv(ctx, slc, atm),
-                          "C", q=ctx.q)["delta"]
+        d_long = bs_greeks(ctx.spot, long_k, t, iv_at(slc, long_k), "C", q=ctx.q)["delta"]
+        d_atm = bs_greeks(ctx.spot, atm, t, iv_at(slc, atm), "C", q=ctx.q)["delta"]
         net_delta = 2 * d_long - d_atm
         # Breakeven comes from struct_metrics, which walks the actual payoff.
         # The closed form 2K_long - K_short + debit is only valid ABOVE the

@@ -187,8 +187,8 @@ def test_zebra_delta_computed_not_assumed():
     s = out[0]
     # greeks are published in risk-navigator units (x100)
     assert 60 <= abs(s.greeks["delta"]) <= 130
-    assert any("solved numerically" in r for r in s.rationale)
-    assert any("Breakeven at expiry" in r for r in s.rationale)
+    assert any("of time value" in r for r in s.rationale)
+    assert any("Net delta computed from the live chain" in r for r in s.rationale)
 
 
 def test_zebra_needs_long_dated_expiry():
@@ -339,3 +339,297 @@ def test_equity_context_windows():
     from selection.equity_context import window_for
     assert window_for("long")[1] > 400
     assert window_for("short")[1] < 90
+
+
+# ------------------------------------------- regressions (v3, live-data) --
+def test_breakeven_single_source_of_truth():
+    """The closed form 2K_long - K_short + debit only holds ABOVE the short
+    strike. On NVDA the true breakeven fell between the strikes and the card
+    printed two different numbers for the same structure."""
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.217)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    s = Zebra().propose(ctx)[0]
+    assert not [r for r in s.rationale if "Breakeven at expiry" in r], \
+        "the card renderer states breakeven; the rationale must not repeat it"
+    assert s.breakevens, "struct_metrics must supply a breakeven"
+    # the closed form is only valid above the short strike and must not be used
+    closed_form = 2 * 195.0 - 225.0 + s.net_mid
+    assert abs(s.breakevens[0] - closed_form) > 0.01 or s.breakevens[0] > 225.0
+
+
+def test_solver_reports_real_long_extrinsic_not_half_of_atm():
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.217)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    atm = ctx.snap(ctx.spot)
+    _, diag = solve_long_strike(ctx, ctx.slices[-1], atm)
+    assert diag["long_extrinsic"] != pytest.approx(diag["atm_extrinsic"] / 2, rel=1e-9) \
+        or diag["net_extrinsic"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_thin_strike_grid_is_declared():
+    """Three surface points is not a solvable grid; the card must say so."""
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.217)
+    ctx.strikes = [212.0, 225.0, 240.0]
+    s = Zebra().propose(ctx)[0]
+    assert any("thin grid" in r for r in s.rationale)
+
+
+def test_degraded_solve_is_not_called_a_zebra():
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.217)
+    ctx.strikes = [212.0, 225.0]
+    s = Zebra().propose(ctx)[0]
+    joined = " ".join(s.rationale)
+    assert "back ratio carrying real premium" in joined
+
+
+def test_proxy_iv_rank_never_shown_as_measured():
+    ctx = make_ctx(regime={"trend": "UP", "bias": 1, "adx": 28, "iv30": 21.7,
+                           "rv21": 39.7, "iv_pctl": 50.0, "ivp_proxy": True})
+    out = gate_e.select(ctx, bars=make_bars(300, 60.0, drift=0.0025))
+    assert out["inputs"]["iv_rank"] is None
+    assert out["inputs"]["iv_rank_proxy"] is True
+    card = cards_e.render(out)
+    assert "IV rank 50" not in card["header"]["meta"]
+    assert any("no free implied-volatility history" in n for n in out["notes"])
+
+
+# ----------------------------------------- regressions (v4, yfinance flake) --
+def test_retry_treats_empty_response_as_failure():
+    from selection import equity_context as ec
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        return [] if calls["n"] < 3 else ["2027-06-18"]
+
+    ec.BACKOFF = 0.001
+    assert ec._retry(flaky, "test") == ["2027-06-18"]
+    assert calls["n"] == 3
+
+
+def test_retry_raises_with_diagnosis_after_exhaustion():
+    from selection import equity_context as ec
+    ec.BACKOFF = 0.001
+    with pytest.raises(RuntimeError, match="empty response"):
+        ec._retry(lambda: [], "throttled")
+
+
+def test_cache_avoids_refetch():
+    from selection import equity_context as ec
+    ec.clear_cache()
+    calls = {"n": 0}
+
+    def fetch():
+        calls["n"] += 1
+        return ["x"]
+
+    assert ec._cached(("k",), fetch) == ["x"]
+    assert ec._cached(("k",), fetch) == ["x"]
+    assert calls["n"] == 1
+    ec.clear_cache()
+
+
+def test_tenor_shortfall_blocks_with_real_numbers():
+    """A name with no LEAPS listed must say so, not report a data failure."""
+    ctx = make_ctx(dte=45)
+    ctx.slices = [ctx.slices[0]]
+    ctx.data = {"tenor_shortfall": {"requested": [90, 500],
+                                    "available_dte": [7, 66],
+                                    "count_in_window": 0}}
+    out = gate_e.select(ctx, hold="long", bars=make_bars(300, 100.0, drift=0.001))
+    joined = " ".join(out["blocks"])
+    assert "TENOR BLOCK" in joined
+    assert "7 to 66 days" in joined
+    assert "listings fact rather than a data failure" in joined
+    assert out["structures"] == []
+
+
+# ------------------------------------ regressions (v5, chain-call budget) --
+def test_dte_range_is_bracketed_to_few_chains(monkeypatch):
+    """build_context_yf fetches one chain per expiry in its range. A wide
+    LEAPS window asked for 16 and got throttled into empty responses, which
+    then reported as '0 expiries' - a message about the wrong thing."""
+    from selection import equity_context as ec
+    ec.clear_cache()
+
+    today = date(2026, 8, 14)
+    listed = [(f"2026-{m:02d}-18", d) for m, d in
+              ((9, 35), (10, 66), (12, 126), (1, 157), (3, 216), (6, 307), (9, 400))]
+    monkeypatch.setattr(ec, "probe_expiries", lambda s, t: listed)
+
+    seen = {}
+
+    def fake_ctx(symbol, today=None, dte_range=None):
+        seen["range"] = dte_range
+        seen["count"] = sum(1 for _, d in listed
+                            if dte_range[0] <= d <= dte_range[1])
+        return make_ctx(symbol)
+
+    monkeypatch.setattr("core.yf_client.build_context_yf", fake_ctx)
+    monkeypatch.setattr("core.stock_data.histories_yf", lambda s, period="2y": {})
+    monkeypatch.setattr(ec, "listed_strikes", lambda *a, **k: [])
+
+    ctx, _ = ec.build("TEST", "long", today=today)
+    assert seen["count"] <= ec.MAX_SLICES, seen
+    assert ctx.data["chains_fetched"] <= ec.MAX_SLICES
+    # and the bracket must sit around the 300-day target, not span the window
+    assert seen["range"][0] > 150, seen["range"]
+    ec.clear_cache()
+
+
+def test_context_is_cached_across_repeat_analyses(monkeypatch):
+    from selection import equity_context as ec
+    ec.clear_cache()
+    today = date(2026, 8, 14)
+    monkeypatch.setattr(ec, "probe_expiries", lambda s, t: [("2027-06-18", 307),
+                                                            ("2027-03-19", 216),
+                                                            ("2026-12-18", 126)])
+    calls = {"n": 0}
+
+    def fake_ctx(symbol, today=None, dte_range=None):
+        calls["n"] += 1
+        return make_ctx(symbol)
+
+    monkeypatch.setattr("core.yf_client.build_context_yf", fake_ctx)
+    monkeypatch.setattr("core.stock_data.histories_yf", lambda s, period="2y": {})
+    monkeypatch.setattr(ec, "listed_strikes", lambda *a, **k: [])
+
+    ec.build("TEST", "long", today=today)
+    ec.build("TEST", "long", today=today)
+    assert calls["n"] == 1
+    ec.clear_cache()
+
+
+# --------------------------------- regressions (v6, Yahoo placeholder IV) --
+def test_iv_solver_round_trips():
+    from core.iv_solve import implied_vol
+    from core.pricing import bs_price
+    for iv in (0.18, 0.32, 0.55, 0.95):
+        for k in (140.0, 195.0, 225.0, 300.0):
+            px = bs_price(225.30, k, 307 / 365, iv, "C")
+            assert implied_vol(px, 225.30, k, 307 / 365, "C") == pytest.approx(iv, abs=2e-3)
+
+
+def test_iv_solver_handles_deep_itm_where_newton_would_diverge():
+    """A ZEBRA long leg lives deep ITM, where vega collapses."""
+    from core.iv_solve import implied_vol
+    from core.pricing import bs_price
+    px = bs_price(225.30, 60.0, 307 / 365, 0.30, "C")
+    assert implied_vol(px, 225.30, 60.0, 307 / 365, "C") is not None
+
+
+def test_iv_solver_rejects_impossible_prices():
+    from core.iv_solve import implied_vol
+    assert implied_vol(0.0, 225.0, 200.0, 0.5, "C") is None
+    assert implied_vol(1.0, 225.0, 200.0, 0.5, "C") is None      # below intrinsic
+    assert implied_vol(999.0, 225.0, 200.0, 0.5, "C") is None    # above bound
+
+
+def test_yahoo_placeholder_iv_is_detected():
+    """The exact values NVDA returned on every LEAPS expiry."""
+    from core.iv_solve import is_sane
+    assert not is_sane(1.0000000000000003e-05)
+    assert not is_sane(0.0004982763671875)
+    assert not is_sane(None)
+    assert is_sane(0.317)
+
+
+def test_repair_iv_replaces_placeholders_but_keeps_real_quotes():
+    pd = pytest.importorskip("pandas")
+    from core.iv_solve import repair_iv
+    from core.pricing import bs_price
+
+    spot, t = 225.30, 307 / 365
+    fair = bs_price(spot, 225.0, t, 0.32, "C")
+    frame = pd.DataFrame([
+        {"strike": 225.0, "bid": fair - 0.2, "ask": fair + 0.2,
+         "lastPrice": fair, "impliedVolatility": 1e-05},          # placeholder
+        {"strike": 200.0, "bid": 40.0, "ask": 41.0,
+         "lastPrice": 40.5, "impliedVolatility": 0.285},          # real
+    ])
+    out = repair_iv(frame, spot, t, "C")
+    assert out.loc[0, "impliedVolatility"] == pytest.approx(0.32, abs=5e-3)
+    assert out.loc[1, "impliedVolatility"] == 0.285
+
+
+# ------------------------------------------- regressions (v7, card dupes) --
+def test_card_states_breakeven_exactly_once():
+    """It appeared twice on the NVDA card: once from the renderer, once from
+    the ZEBRA rationale."""
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408,
+                   regime={"trend": "UP", "bias": 1, "adx": 28, "iv30": 40.8,
+                           "rv21": 39.7, "iv_pctl": 50.0, "ivp_proxy": True})
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    card = cards_e.render(gate_e.build(ctx, "long", trend_state=1,
+                                       bars=make_bars(300, 60.0, drift=0.0025)))
+    bullets = card["sections"].get("STRUCTURE", [])
+    assert sum(1 for b in bullets if "Breakeven at expiry" in b) <= 1, bullets
+
+
+def test_solver_prefers_real_curve_over_three_anchor_interpolation():
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    slc = ctx.slices[-1]
+    from strategies.zebra import curve_iv
+    assert curve_iv(ctx, slc, 210.0) == pytest.approx(iv_at_ref(slc, 210.0), abs=1e-9)
+
+    ctx.data["iv_curve"] = {slc.expiry.isoformat(): {210.0: 0.372}}
+    assert curve_iv(ctx, slc, 210.0) == 0.372
+
+
+def iv_at_ref(slc, k):
+    from core.chain import iv_at
+    return iv_at(slc, k)
+
+
+def test_degraded_solve_reports_what_it_evaluated():
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [210.0, 225.0]
+    s = Zebra().propose(ctx)[0]
+    assert any("Closest strikes the solver could reach" in r for r in s.rationale)
+
+
+# ------------------------------ regressions (v8, degenerate delta deep ITM) --
+def test_leg_iv_never_degenerate():
+    """NVDA reported a 100-delta long leg carrying $17.78 of time value.
+    iv_at extrapolates 1.6x past the 25-delta wings; deep ITM that reached
+    zero, and bs_greeks short-circuits to delta 1.00 for a zero-vol ITM call."""
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    s = Zebra().propose(ctx)[0]
+    for leg in s.legs:
+        assert leg.iv > 0.02, f"{leg.strike} carries iv={leg.iv}"
+        assert leg.iv < 3.0
+
+
+def test_deep_itm_delta_is_not_exactly_one():
+    from core.pricing import bs_greeks
+    from strategies.zebra import curve_iv
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    slc = ctx.slices[-1]
+    d = bs_greeks(ctx.spot, 180.0, 307 / 365, curve_iv(ctx, slc, 180.0), "C")["delta"]
+    assert 0.60 < d < 0.99, d
+
+
+def test_extrinsic_and_delta_are_consistent():
+    """A strike with material time value cannot also be 100 delta."""
+    from strategies.zebra import curve_iv, extrinsic
+    from core.pricing import bs_greeks
+    ctx = make_ctx(spot=225.30, dte=307, iv=0.408)
+    ctx.strikes = [float(k) for k in range(120, 301, 5)]
+    slc, t = ctx.slices[-1], 307 / 365
+    for k in (170.0, 180.0, 195.0, 210.0):
+        iv = curve_iv(ctx, slc, k)
+        ex = extrinsic(ctx.spot, k, t, iv)
+        d = bs_greeks(ctx.spot, k, t, iv, "C")["delta"]
+        if ex > 1.0:
+            assert d < 0.995, f"strike {k}: extrinsic {ex:.2f} but delta {d:.3f}"
+
+
+def test_iv_clamp_rejects_negative_extrapolation():
+    from strategies.zebra import _clamp
+    assert _clamp(-0.1) == 0.02
+    assert _clamp(0.0) == 0.02
+    assert _clamp(9.9) == 3.0
+    assert _clamp(0.35) == 0.35

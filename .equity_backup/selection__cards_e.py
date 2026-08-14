@@ -48,6 +48,8 @@ def _header(payload: dict) -> dict:
     bits = [payload.get("stage", "?")]
     if i.get("iv_rank") is not None:
         bits.append(f"IV rank {i['iv_rank']:.0f}")
+    elif i.get("iv_rank_proxy"):
+        bits.append("IV rank n/a")
     if i.get("iv_rv") is not None:
         bits.append(f"IV/RV {i['iv_rv']:.2f}")
     if i.get("skew_rr25") is not None:
@@ -75,8 +77,8 @@ def render(gate_e: dict, *, radar: dict | None = None,
             f"structure, which is what gates the direction of any structure below.")
         if i.get("iv_rv") is not None:
             sections["SETUP"].append(
-                f"Implied volatility sits at {i['iv30'] * 100:.1f}% against realised of "
-                f"{i['rv21'] * 100:.1f}%, a ratio of {i['iv_rv']:.2f}, which decides whether "
+                f"Implied volatility sits at {i['iv30']:.1f}% against realised of "
+                f"{i['rv21']:.1f}%, a ratio of {i['iv_rv']:.2f}, which decides whether "
                 f"this is a name to buy premium on or sell it on.")
 
     # ---------------------------------------------------------- STRUCTURE

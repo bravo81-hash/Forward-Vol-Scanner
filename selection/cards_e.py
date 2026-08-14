@@ -48,6 +48,8 @@ def _header(payload: dict) -> dict:
     bits = [payload.get("stage", "?")]
     if i.get("iv_rank") is not None:
         bits.append(f"IV rank {i['iv_rank']:.0f}")
+    elif i.get("iv_rank_proxy"):
+        bits.append("IV rank n/a")
     if i.get("iv_rv") is not None:
         bits.append(f"IV/RV {i['iv_rv']:.2f}")
     if i.get("skew_rr25") is not None:

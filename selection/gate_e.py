@@ -100,6 +100,12 @@ def select(ctx: Context, hold: str = "medium", *,
 
     iv, rv, ratio = iv_rv(reg)
     iv_rank = reg.get("iv_pctl")      # already 0-100 from core.regime
+    # Single names have no free IV history, so core.yf_client sets ivp_proxy
+    # and iv_pctl defaults to 50. A hard-coded 50 must never drive the matrix
+    # or appear on a card as though it were measured.
+    iv_proxy = bool(reg.get("ivp_proxy"))
+    if iv_proxy:
+        iv_rank = None
 
     blocks: list[str] = []
     notes: list[str] = []
@@ -131,7 +137,13 @@ def select(ctx: Context, hold: str = "medium", *,
             "Long-premium structures are not blocked on volatility grounds here "
             "and are in fact favourably priced, because cheap implied volatility "
             "is exactly the condition that makes buying the long leg attractive.")
-    elif ratio is not None:
+    if iv_proxy:
+        notes.append(
+            "IV rank is unavailable because there is no free implied-volatility "
+            "history for single names, so the volatility read rests entirely on "
+            "the IV-to-realised ratio rather than on where IV sits in its range.")
+
+    if ratio is not None and ratio >= IVRV_FLOOR:
         notes.append(
             f"Implied volatility of {iv:.1f}% against realised of {rv:.1f}% gives "
             f"a ratio of {ratio:.2f}, so premium is fairly to richly priced and "
@@ -142,6 +154,8 @@ def select(ctx: Context, hold: str = "medium", *,
     if not blocks or all(b.startswith("PREMIUM") for b in blocks):
         low = iv_rank is not None and iv_rank < IV_RANK_LOW
         high = iv_rank is not None and iv_rank > IV_RANK_HIGH
+        if iv_rank is None and ratio is not None:
+            low, high = ratio < IVRV_FLOOR, ratio > 1.15
 
         if stage > 0:
             if low or sell_blocked:
@@ -184,7 +198,20 @@ def select(ctx: Context, hold: str = "medium", *,
     # core.chain.SCAN_DTE caps the default yfinance context at 85 DTE, so
     # without this check a months-long request silently returns a 28-day
     # structure — the exact mismatch that makes a card look right and be wrong.
-    if slc is not None and not (lo <= slc.dte <= hi):
+    shortfall = (ctx.data or {}).get("tenor_shortfall")
+    if shortfall:
+        req_lo, req_hi = shortfall["requested"]
+        a_lo, a_hi = shortfall["available_dte"]
+        blocks.append(
+            f"TENOR BLOCK: the {hold} hold needs an expiry between {req_lo} and "
+            f"{req_hi} days, but {ctx.symbol} lists nothing in that range - the "
+            f"available expiries run {a_lo} to {a_hi} days.")
+        blocks.append(
+            "That is a listings fact rather than a data failure, so widening the "
+            "search will not help; either pick a shorter hold or trade a name "
+            "that has LEAPS listed.")
+        picks = []
+    elif slc is not None and not (lo <= slc.dte <= hi):
         blocks.append(
             f"TENOR BLOCK: the requested {hold} hold needs an expiry between {lo} "
             f"and {hi} days, but the nearest available on this surface is "
@@ -206,6 +233,7 @@ def select(ctx: Context, hold: str = "medium", *,
         "inputs": {
             "iv30": iv, "rv21": rv, "iv_rv": round(ratio, 3) if ratio else None,
             "iv_rank": round(iv_rank, 1) if iv_rank is not None else None,
+            "iv_rank_proxy": iv_proxy,
             "skew_rr25": round(slc.rr25, 2) if slc else None,
             "dte": slc.dte if slc else None,
             "target_dte": target,
