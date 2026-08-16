@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equity LEAPS Engine</title>
+<style>
+:root{--bg:#0b0f16;--panel:#111826;--line:#1e2a3d;--ink:#dfe7f3;--dim:#8496b0;
+      --accent:#7aa2f7;--warn:#e0af68;--bad:#f7768e;--good:#9ece6a;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:14px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;align-items:baseline;gap:18px;padding:14px 22px;
+       border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+h1{font:700 20px/1 Georgia,serif;margin:0}
+.sub{color:var(--dim);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+nav{margin-left:auto;display:flex;gap:16px}
+nav a{color:var(--ink);text-decoration:none;font-size:13px;opacity:.75}
+nav a:hover{opacity:1;text-decoration:underline}
+main{padding:20px 22px;max-width:1100px}
+.bar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;
+     background:var(--panel);border:1px solid var(--line);padding:14px;border-radius:8px}
+label{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+      color:var(--dim);margin-bottom:5px}
+input,select{background:#0c121d;color:var(--ink);border:1px solid var(--line);
+             border-radius:6px;padding:8px 10px;font:inherit;min-width:120px}
+button{background:var(--accent);color:#0b0f16;border:0;border-radius:6px;
+       padding:9px 18px;font:600 14px inherit;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+      padding:18px;margin-top:16px}
+.chead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+       border-bottom:1px solid var(--line);padding-bottom:10px;margin-bottom:12px}
+.sym{font:700 22px/1 Georgia,serif}
+.meta{color:var(--dim);font-size:12px}
+.action{margin-left:auto;font:700 13px inherit;letter-spacing:.1em;
+        padding:5px 12px;border-radius:5px;background:#16324b;color:var(--accent)}
+.action.aside{background:#3a1f28;color:var(--bad)}
+.src{font-size:10px;letter-spacing:.1em;padding:3px 8px;border-radius:4px;
+     background:#1a2233;color:var(--dim);text-transform:uppercase}
+.src.live{background:#1d3524;color:var(--good)}
+h3{font:600 10px/1 inherit;letter-spacing:.18em;text-transform:uppercase;
+   color:var(--dim);margin:16px 0 7px}
+ul{margin:0;padding-left:18px}
+li{margin:5px 0}
+.flags li{color:var(--warn)}
+.note{color:var(--dim);font-size:12px;margin-top:8px}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--dim);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+tr.pick{cursor:pointer}
+tr.pick:hover{background:#16203010}
+.err{color:var(--bad);margin-top:12px}
+.spin{color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Equity LEAPS Engine</h1>
+  <span class="sub">Radar-B · Gate E</span>
+  <nav>
+    <a href="/last-hour">Last Hour</a><a href="/stocks">Stock Radar</a>
+    <a href="/patterns">Pattern Scanner</a><a href="/value-puts">Value Puts</a>
+    <a href="/research">Research</a><a href="/campaigns">Campaign Lab</a>
+  </nav>
+</header>
+
+<main>
+  <div class="bar">
+    <div><label>Ticker</label><input id="sym" value="NFLX" placeholder="NFLX"></div>
+    <div><label>Hold</label>
+      <select id="hold">
+        <option value="short">Short · 1-2 weeks</option>
+        <option value="medium" selected>Medium · 4-6 weeks</option>
+        <option value="long">Long · months (LEAPS)</option>
+      </select></div>
+    <div><label>Verify reclaim trigger</label>
+      <select id="trig"><option value="0">Not requested</option><option value="1">Verify now</option></select></div>
+    <div><label>Data</label>
+      <select id="src">
+        <option value="auto" selected>Auto · TWS then yfinance</option>
+        <option value="live">TWS only</option>
+        <option value="yf">yfinance only</option>
+      </select></div>
+    <button id="go">Analyse</button>
+    <button id="radar" class="ghost">Run Radar-B</button>
+  </div>
+
+  <div id="out"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function bullets(items, cls){
+  if(!items || !items.length) return '';
+  return `<ul class="${cls||''}">` + items.map(b=>`<li>${esc(b)}</li>`).join('') + '</ul>';
+}
+
+function renderCard(card, badge){
+  const h = card.header || {};
+  const aside = /STAND ASIDE/.test(card.action||'');
+  const order = ['SETUP','STRUCTURE','ENTRY','EXIT','MANAGE','FLAGS'];
+  const secs = order.filter(s => (card.sections||{})[s])
+    .map(s => `<h3>${s}</h3>` + bullets(card.sections[s], s==='FLAGS'?'flags':''))
+    .join('');
+  return `<div class="card">
+      <div class="chead">
+        <span class="sym">${esc(h.symbol||'')}</span>
+        <span class="meta">$${(h.spot||0).toFixed(2)} · ${esc(h.meta||'')}</span>
+        ${badge||''}
+        <span class="action ${aside?'aside':''}">${esc(card.action||'')}</span>
+      </div>${secs}</div>`;
+}
+
+async function analyse(){
+  const sym = $('#sym').value.trim().toUpperCase();
+  if(!sym) return;
+  $('#out').innerHTML = '<p class="spin">Fetching chain and computing stage…</p>';
+  try{
+    const r = await fetch(`/api/equity/gate-e?symbol=${encodeURIComponent(sym)}`
+      + `&hold=${$('#hold').value}&trigger=${$('#trig').value}`
+      + `&source=${$('#src').value}`);
+    const j = await r.json();
+    if(!r.ok){ $('#out').innerHTML = `<p class="err">${esc(j.error||'failed')}<br>`
+      + esc((j.errors||[]).join(' · ')) + '</p>'; return; }
+    const badge = j.source === 'IBKR TWS'
+      ? '<span class="src live">TWS</span>'
+      : `<span class="src">${esc(j.source||'yfinance')}</span>`;
+    $('#out').innerHTML = renderCard(j.card, badge);
+  }catch(e){ $('#out').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+async function runRadar(){
+  $('#out').innerHTML = '<p class="spin">Running Radar-B across the universe — '
+    + 'this pulls fundamentals per name and takes a minute…</p>';
+  try{
+    const r = await fetch('/api/equity/radar');
+    const j = await r.json();
+    if(!r.ok){ $('#out').innerHTML = `<p class="err">${esc(j.error||'failed')}</p>`; return; }
+    const rows = (j.watchlist||[]).map(w => `<tr class="pick" data-sym="${esc(w.symbol)}">
+        <td><strong>${esc(w.symbol)}</strong></td>
+        <td>${(w.score||0).toFixed(1)}</td>
+        <td>${((w.metrics||{}).drawdown*100||0).toFixed(0)}%</td>
+        <td>${((w.metrics||{}).atr_compression||0).toFixed(2)}x</td>
+        <td>${((w.metrics||{}).base_weeks||0).toFixed(0)}w</td></tr>`).join('');
+    $('#out').innerHTML = `<div class="card">
+      <div class="chead"><span class="sym">Radar-B watchlist</span>
+        <span class="meta">${j.qualified} qualified · showing ${j.returned}</span></div>
+      <table><thead><tr><th>Symbol</th><th>Score</th><th>Drawdown</th>
+        <th>ATR compression</th><th>Base age</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5">No names cleared the gates.</td></tr>'}</tbody></table>
+      <p class="note">${esc(j.note||'')} Click a row to run Gate E on it.</p></div>`;
+    document.querySelectorAll('tr.pick').forEach(tr => tr.onclick = () => {
+      $('#sym').value = tr.dataset.sym; analyse();
+    });
+  }catch(e){ $('#out').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+}
+
+$('#go').onclick = analyse;
+$('#radar').onclick = runRadar;
+$('#sym').addEventListener('keydown', e => { if(e.key === 'Enter') analyse(); });
+analyse();
+</script>
+</body>
+</html>

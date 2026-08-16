@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from .chain import SURFACE_CFG, build_chain_live, build_chain_mock
+from .chain import build_chain_live, build_chain_mock, surface_cfg
 from .events import event_flags, trading_clock, trading_today
 from .historical import free_daily_inputs
 from .ib_client import BARS_CACHE, daily_bars, with_ib
@@ -20,7 +20,9 @@ from .surface import FRONT_DTE, iv_cm, pair_table, term_stats
 
 
 def build_context(symbol: str, mode: str = "mock", today: date | None = None,
-                  host=None, port=None, manual: dict | None = None) -> Context:
+                  host=None, port=None, manual: dict | None = None,
+                  dte_range: tuple[int, int] | None = None,
+                  strike_band: tuple[float, float] | None = None) -> Context:
     today = today or trading_today()
     manual = manual or {}
     if mode == "mock":
@@ -49,7 +51,7 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
 
         def job(ib):
             from ib_insync import Index, Stock
-            st, exch, tc, is_idx = SURFACE_CFG[symbol]
+            st, exch, tc, is_idx = surface_cfg(symbol)
             und = Index(symbol, exch, "USD") if is_idx else Stock(symbol, "SMART", "USD")
             ib.qualifyContracts(und)
             diag = {"market_data_type": "live" if clock["regular_session"] else "frozen"}
@@ -93,9 +95,17 @@ def build_context(symbol: str, mode: str = "mock", today: date | None = None,
                 ivh_ = []
             ib.reqMarketDataType(1 if clock["regular_session"] else 2)
             fallback_iv = (ivh_[-1] / 100 if ivh_ else None)
+            # Passed only when set, so the default index path keeps its
+            # original call signature - existing stubs in the test suite bind
+            # to it exactly.
+            extra = {}
+            if dte_range:
+                extra["dte_range"] = dte_range
+            if strike_band:
+                extra["strike_band"] = strike_band
             sp, sl, ks = build_chain_live(
                 ib, symbol, today, fallback_spot=brs[-1][4],
-                fallback_iv=fallback_iv, diagnostics=diag)
+                fallback_iv=fallback_iv, diagnostics=diag, **extra)
             return sp, sl, ks, brs, ivh_, diag
         kw = {}
         if host:
