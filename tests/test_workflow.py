@@ -8,10 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.context import build_context
 from core.models import Context, Leg, Suggestion
-from selection.ranker import shortlist, verdict_size
-from selection.manage import management_plan, _p_touch
-from portfolio.risk import lots_for, budget_for
 from portfolio.book import book_greeks
+from portfolio.risk import budget_for, lots_for
+from selection.manage import _p_touch, management_plan
+from selection.ranker import shortlist, verdict_size
 
 TODAY = date(2026, 7, 1)
 
@@ -181,7 +181,6 @@ def test_model_path_also_risknav_units():
 
 
 def test_recalibrated_band_flags_the_reported_book():
-    from portfolio.risk import budget_for
     band = budget_for(215_000)["delta"]           # $215k account
     assert band < 14.0                            # 14 deltas is now OFF-neutral
     assert 8.0 < band < 13.0                      # ~10.75: 5 deltas per $100k

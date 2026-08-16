@@ -18,6 +18,7 @@ def test_pricing_parity():
 
 def test_calendar_metrics_shape():
     from datetime import timedelta
+
     from core.models import Leg
     from core.pricing import struct_metrics
     legs = [Leg("P", 6000, TODAY + timedelta(days=14), -1, .15),
@@ -35,6 +36,7 @@ def test_chain_and_pairs():
     pt = pair_table(sl, TODAY)
     for p in pt:                       # FOMC-in-back-only pairs must be gone
         from datetime import date as D
+
         from core.events import fomc_between
         assert not fomc_between(D.fromisoformat(p["front"]), D.fromisoformat(p["back"]))
 
@@ -229,6 +231,7 @@ def test_monday_allows_condor():
 
 def test_campaign_legs_excluded():
     from datetime import timedelta
+
     from core.context import build_context
     from portfolio.book import book_greeks
     ctx = build_context("SPX", "mock", TODAY)
@@ -247,9 +250,10 @@ def test_campaign_legs_excluded():
 
 def test_trading_today_tz(monkeypatch):
     """A Melbourne Saturday morning (07:00 AEST) is still Friday in New York."""
+    import datetime as _dt
     from datetime import date as D
     from zoneinfo import ZoneInfo
-    import datetime as _dt
+
     import core.events as ce
 
     # 2026-06-27 07:00 AEST  ==  2026-06-26 21:00 UTC  ==  2026-06-26 17:00 EDT
@@ -281,6 +285,7 @@ def test_friday_gate_ny_anchored():
 
 def test_stress_book_direction():
     from datetime import timedelta
+
     from core.context import build_context
     from portfolio.book import stress_book
     ctx = build_context("SPX", "mock", TODAY)

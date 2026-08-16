@@ -1,7 +1,6 @@
 """Exact custom-combo links for OptionStrat."""
 from __future__ import annotations
 
-
 OCC_ROOT = {"SPX": "SPXW", "RUT": "RUTW"}
 
 

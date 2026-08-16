@@ -4,9 +4,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from execution.candidates import persist_cards, validate_for_stage, within_execution_window
 from store.campaigns import CampaignStore
-from execution.candidates import persist_cards, validate_for_stage
-from execution.candidates import within_execution_window
 
 
 def _payload():

@@ -1,9 +1,11 @@
 from core.models import Context, Suggestion
+
 from .base import Strategy
 
 
 class Diagonal(Strategy):
     key, name = "diagonal", "Diagonal"
+    multi_expiry = True
 
     def propose(self, ctx: Context) -> list[Suggestion]:
         if not ctx.pairs:

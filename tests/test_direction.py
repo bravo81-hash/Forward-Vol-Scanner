@@ -6,8 +6,7 @@ from datetime import date, timedelta
 import pytest
 
 from core.models import Context, Slice
-from selection.direction import (BUY_VRP, SELL_VRP, direction_verdict, gate1,
-                                 gate2, vol_band)
+from selection.direction import BUY_VRP, SELL_VRP, direction_verdict, gate1, gate2, vol_band
 
 TODAY = date(2026, 7, 7)
 

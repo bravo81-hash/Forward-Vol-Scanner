@@ -4,6 +4,7 @@ import store.campaigns as campaign_module
 def test_historical_snapshot_endpoint(monkeypatch):
     import core.historical
     import webapp
+    from web import shared
 
     expected = {"symbol": "SPX", "entry_date": "2025-03-17", "spot": 5600,
                 "intent": "neutral", "confidence": "HIGH"}
@@ -24,6 +25,7 @@ def test_live_tws_one_mode_uses_current_context(monkeypatch, tmp_path):
     campaign_module._STORE = None
     import webapp
     from core.context import build_context
+    from web import shared
 
     ctx = build_context("SPX", "mock")
     ctx.mode = "live"
@@ -32,15 +34,15 @@ def test_live_tws_one_mode_uses_current_context(monkeypatch, tmp_path):
     profile = {"account": "DU123", "nlv": 100_000.0, "pool": "investing",
                "cash_account": True, "block_multi_expiry": True, "mode": "paper"}
     ctx.mandate = profile
-    monkeypatch.setattr(webapp, "_v3_context",
+    monkeypatch.setattr(shared, "v3_context",
                         lambda *args, **kwargs: (ctx, profile, []))
-    monkeypatch.setattr(webapp, "with_ib", lambda fn: fn(object()))
+    monkeypatch.setattr(shared, "with_ib", lambda fn: fn(object()))
 
     def fake_reprice(_ib, _symbol, _spot, _today, cards):
         for card in cards:
             card["mid_src"] = "live"
 
-    monkeypatch.setattr(webapp, "reprice_cards", fake_reprice)
+    monkeypatch.setattr(shared, "reprice_cards", fake_reprice)
     data = webapp.app.test_client().get(
         "/api/v3/opportunities?symbol=SPX&intent=bull&mode=live&account=DU123"
         "&mandate=cash&nlv=100000"
@@ -54,8 +56,9 @@ def test_live_tws_one_mode_uses_current_context(monkeypatch, tmp_path):
 
 def test_explicit_mandate_can_override_mock_account_type():
     import webapp
+    from web import shared
 
-    _, profile, _ = webapp._v3_context("SPX", "mock", "MOCK-B", 100_000,
+    _, profile, _ = shared.v3_context("SPX", "mock", "MOCK-B", 100_000,
                                        mandate="margin")
     assert profile["cash_account"] is False
     assert profile["block_multi_expiry"] is False
@@ -65,6 +68,7 @@ def test_v3_mock_end_to_end(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "v3.sqlite"))
     campaign_module._STORE = None
     import webapp
+    from web import shared
     client = webapp.app.test_client()
     res = client.get("/api/v3/opportunities?symbol=SPX&intent=bull&mode=mock&account=MOCK-B&nlv=100000")
     assert res.status_code == 200
@@ -100,6 +104,7 @@ def test_v3_lab_exposes_all_cash_permitted_families(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "lab.sqlite"))
     campaign_module._STORE = None
     import webapp
+    from web import shared
     d = webapp.app.test_client().get(
         "/api/v3/opportunities?symbol=SPX&intent=neutral&mode=mock&account=MOCK-B&nlv=100000&lab=true"
     ).get_json()
@@ -115,6 +120,7 @@ def test_historical_one_context_is_date_aware_and_ranked(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "historical.sqlite"))
     campaign_module._STORE = None
     import webapp
+    from web import shared
     q = ("/api/v3/opportunities?symbol=SPX&intent=bear&mode=mock&account=MOCK-B"
          "&nlv=100000&entry_date=2025-03-17&entry_time=15:30&spot=5600"
          "&iv30=28&rv21=20&vrp_fwd=8&rr25=7&iv_band=ELV"
@@ -136,6 +142,7 @@ def test_inverted_front_enforces_zero_new_carry(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "inverted.sqlite"))
     campaign_module._STORE = None
     import webapp
+    from web import shared
     base = ("/api/v3/opportunities?symbol=SPX&mode=mock&account=MOCK-B&nlv=100000"
             "&entry_date=2025-03-17&entry_time=15:30&spot=5600&iv30=35&rv21=38"
             "&vrp_fwd=-3&rr25=8&iv_band=STR&term=INVERTED%20FRONT&trend=DN&event=NONE")
@@ -149,6 +156,7 @@ def test_two_strategies_form_one_complete_matched_date_session(monkeypatch, tmp_
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "matched-api.sqlite"))
     campaign_module._STORE = None
     import webapp
+    from web import shared
     client = webapp.app.test_client()
     q = ("/api/v3/opportunities?symbol=SPX&intent=neutral&mode=mock&account=MOCK-B"
          "&nlv=100000&entry_date=2025-03-17&entry_time=15:30&spot=5600"

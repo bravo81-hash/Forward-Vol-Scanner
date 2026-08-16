@@ -1,6 +1,7 @@
 from datetime import datetime
-from core.events import opex_day
+
 from core.models import Context, Suggestion
+
 from .base import Strategy
 
 
@@ -37,7 +38,7 @@ class Butterfly(Strategy):
                     self.leg(ctx, slc, "P", ctx.snap(body - w), +1)]
             sug = self.make(ctx, f"OTM put fly {slc.dte}d body {body:g}", legs, 0.0, [],
                             delta_band=(-0.08, -0.03), gamma_test=False)
-            sug.rationale = [f"Body at lower EM edge — where a normal down-move lands",
+            sug.rationale = ["Body at lower EM edge — where a normal down-move lands",
                              f"Debit {sug.net_mid:.2f} for max {sug.max_profit:.2f}",
                              f"Bias {ctx.regime['bias']:+d} — drift-down convexity"]
             sug.score = round(min(sug.max_profit / max(sug.net_mid, 0.01), 10) * 0.25

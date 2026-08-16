@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.models import Context, Suggestion
+
 from .base import Strategy
 
 

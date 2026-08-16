@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from functools import lru_cache
 
+from core import barcache
 from core.events import opex_day, trading_today
 from core.regime import compute_regime
 
@@ -22,6 +23,21 @@ PROXY_TICKERS = ("^VIX9D", "^VIX3M", "^SKEW")
 
 @lru_cache(maxsize=96)
 def _yf_history(ticker: str, year: int) -> tuple[tuple, ...]:
+    """In-process memo over a durable on-disk cache over yfinance.
+
+    Daily closes are immutable once the session ends, so the disk layer means
+    a restart (or a second worker, or the radar scheduler) no longer re-pays
+    for history it already has.
+    """
+    cached = barcache.get(ticker, year)
+    if cached is not None:
+        return cached
+    rows = _yf_history_uncached(ticker, year)
+    barcache.put(ticker, year, rows)
+    return rows
+
+
+def _yf_history_uncached(ticker: str, year: int) -> tuple[tuple, ...]:
     try:
         import yfinance as yf
     except ImportError as exc:  # pragma: no cover - installation problem
@@ -86,7 +102,7 @@ def auto_historical_snapshot(symbol: str, as_of: date, loader=None) -> dict:
             return []
 
     with ThreadPoolExecutor(max_workers=len(tickers)) as pool:
-        fetched = dict(zip(tickers, pool.map(safe_load, tickers)))
+        fetched = dict(zip(tickers, pool.map(safe_load, tickers), strict=False))
     # The test entry is 15:30 ET. Daily closes stamped with ``as_of`` are not
     # known yet, so auto mode deliberately stops at the prior trading close.
     rows = {ticker: [r for r in data if r[0] < as_of]

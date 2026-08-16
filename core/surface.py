@@ -1,16 +1,20 @@
 """Term-structure / forward-vol / verdict math on a list of Slices."""
 from __future__ import annotations
+
 import math
 from datetime import date
-from .models import Slice
+
+from config.loader import doctrine
+
 from .events import fomc_between, fomc_within, macro_between, macro_within
+from .models import Slice
 
 FRONT_DTE = (12, 21)
 BACK_DTE = (26, 45)
 MIN_GAP = 7
 
-FOMC_HIST_MOVE_PCT = 0.9    # SPX FOMC-day |move| averages ~0.8-1.0%
-HARVEST_MIN_RATIO = 1.25    # implied event move must clear hist by this ratio
+FOMC_HIST_MOVE_PCT = doctrine("harvest", "fomc_hist_move_pct", 0.9)
+HARVEST_MIN_RATIO = doctrine("harvest", "harvest_min_ratio", 1.25)
 
 
 def _iv_near(slices: list[Slice], dte: int) -> float:
@@ -28,7 +32,7 @@ def iv_cm(slices: list[Slice], dte: int) -> float:
         return ss[0].atm_iv
     if dte >= ss[-1].dte:
         return ss[-1].atm_iv
-    for a, b in zip(ss, ss[1:]):
+    for a, b in zip(ss, ss[1:], strict=False):
         if a.dte <= dte <= b.dte:
             va, vb = a.atm_iv ** 2 * a.dte, b.atm_iv ** 2 * b.dte
             v = va + (vb - va) * (dte - a.dte) / (b.dte - a.dte)

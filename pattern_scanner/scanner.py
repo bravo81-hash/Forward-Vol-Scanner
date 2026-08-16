@@ -16,8 +16,6 @@ import pandas as pd
 from pattern_scanner import indicators as ind
 from pattern_scanner.patterns import PatternCandidate, detect_all
 
-
-
 SECTOR_ETFS = {
     "XLC": "Communication",
     "XLY": "Consumer discretionary",

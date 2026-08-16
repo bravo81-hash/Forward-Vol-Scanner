@@ -9,6 +9,7 @@ LIVE (TWS, pacing-aware — see ib_client):
 MOCK: synthetic skewed surface, no TWS required.
 """
 from __future__ import annotations
+
 import math
 from datetime import date, datetime, timedelta
 
@@ -116,7 +117,7 @@ def build_chain_live(ib, symbol: str, today: date, *,
     q1 = quote_many(ib, [x[4] for x in p1 if x[4].conId], fields="100,101")
 
     atm: dict[date, dict] = {}
-    for d, _, cp, ks, c in p1:
+    for d, _, _cp, ks, c in p1:
         r = q1.get(c.conId) or {}
         a = atm.setdefault(d, {"strike": ks, "ivs": [], "spr": [], "oi": 0})
         if r.get("iv"):

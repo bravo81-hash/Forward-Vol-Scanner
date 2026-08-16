@@ -1,4 +1,5 @@
 from core.models import Context, Suggestion
+
 from .base import Strategy
 
 

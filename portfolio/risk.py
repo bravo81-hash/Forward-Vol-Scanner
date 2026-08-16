@@ -11,12 +11,18 @@ SPX 6800 — so a 14-delta book on $215k read as "neutral". The band is now
 book correctly flags as off-neutral. Tune below.
 """
 from __future__ import annotations
+
+from config.loader import doctrine
 from core.models import Suggestion
 
-BUDGET_PER_100K = {   # |limit| per surface, per $100k of account NLV
+_DEFAULT_BUDGET = {   # |limit| per surface, per $100k of account NLV
     "vega": 1200.0,   # $ per 1 vol pt (== 1.2% NLV per vol point)
     "delta": 5.0,     # underlying deltas (~34% NLV delta-dollars at SPX ~6800)
     "theta_min": 0.0, # net theta ($/day) should stay >= 0 for a harvest book
+}
+BUDGET_PER_100K = {
+    k: float(doctrine("risk", "budget_per_100k", _DEFAULT_BUDGET).get(k, v))
+    for k, v in _DEFAULT_BUDGET.items()
 }
 
 

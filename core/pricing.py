@@ -6,8 +6,11 @@ so q drives mock mode, pre-reprice ranking, and the MODEL book greeks
 contract at 30 DTE.
 """
 from __future__ import annotations
+
 import math
 from datetime import date
+from functools import lru_cache
+
 from .models import Leg
 
 RISK_FREE = 0.04
@@ -32,8 +35,11 @@ def _d12(s, k, t, iv, r, q):
     return d1, d1 - sq, sq
 
 
+@lru_cache(maxsize=1 << 17)
 def bs_price(s: float, k: float, t: float, iv: float, cp: str,
              r: float = RISK_FREE, q: float = 0.0) -> float:
+    """Memoised: the ranker prices the same (strike, expiry, IV) repeatedly at
+    one spot as every family is scored against a single Context."""
     if t <= 0:
         return max(0.0, s - k if cp == "C" else k - s)
     if iv <= 0:
@@ -47,6 +53,19 @@ def bs_price(s: float, k: float, t: float, iv: float, cp: str,
 
 def bs_greeks(s: float, k: float, t: float, iv: float, cp: str,
               r: float = RISK_FREE, q: float = 0.0) -> dict:
+    """Memoised via `_bs_greeks_cached`; returns a fresh dict so callers that
+    mutate the result cannot poison the cache."""
+    return dict(_bs_greeks_cached(s, k, t, iv, cp, r, q))
+
+
+@lru_cache(maxsize=1 << 17)
+def _bs_greeks_cached(s: float, k: float, t: float, iv: float, cp: str,
+                      r: float = RISK_FREE, q: float = 0.0) -> tuple:
+    return tuple(_bs_greeks_impl(s, k, t, iv, cp, r, q).items())
+
+
+def _bs_greeks_impl(s: float, k: float, t: float, iv: float, cp: str,
+                    r: float = RISK_FREE, q: float = 0.0) -> dict:
     if t <= 0 or iv <= 0:
         itm = (s > k) if cp == "C" else (s < k)
         return {"delta": (1.0 if cp == "C" else -1.0) if itm else 0.0,
@@ -149,7 +168,32 @@ def _profile_values(spot: float, legs: list[Leg], today: date, entry: float,
         hi = max(spot * 1.30, max(leg.strike for leg in legs) * 1.10)
         grid = [lo + (hi - lo) * i / max(samples - 1, 1) for i in range(samples)]
         xs = sorted(set(grid + [float(leg.strike) for leg in legs]))
-    pnl = [struct_value(x, legs, today, elapsed=elapsed, q=q) - entry for x in xs]
+    # Per-leg constants (tenor, discount factors) do not vary along the grid.
+    # The previous per-grid-point call into struct_value recomputed them for
+    # every one of up to 4001 samples per leg; on a multi-expiry card that is
+    # ~16k redundant exp() evaluations per risk profile.
+    pnl = [-entry] * len(xs)
+    for leg in legs:
+        t = max(0, (leg.expiry - today).days - elapsed) / 365.0
+        qty, k, iv, cp = leg.qty, leg.strike, leg.iv, leg.cp
+        if t <= 0:
+            for i, x in enumerate(xs):
+                pnl[i] += qty * max(0.0, x - k if cp == "C" else k - x)
+            continue
+        iv_ = iv if iv > 0 else 0.01
+        sq = iv_ * math.sqrt(t)
+        drift = (RISK_FREE - q + 0.5 * iv_ * iv_) * t
+        dq, dr = math.exp(-q * t), math.exp(-RISK_FREE * t)
+        log_k = math.log(k)
+        call = cp == "C"
+        for i, x in enumerate(xs):
+            d1 = (math.log(x) - log_k + drift) / sq
+            d2 = d1 - sq
+            if call:
+                v = x * dq * norm_cdf(d1) - k * dr * norm_cdf(d2)
+            else:
+                v = k * dr * norm_cdf(-d2) - x * dq * norm_cdf(-d1)
+            pnl[i] += qty * v
     return xs, pnl
 
 

@@ -1,0 +1,27 @@
+# Sector valuation multiples for the Value Entry Put Scanner.
+#
+# (pe_bull, pe_bear, ev_ebitda_bull, ev_ebitda_bear) per sector. These are a
+# judgement about where a sector deserves to trade, not a market observation,
+# so they go stale silently through a re-rating. `last_reviewed` is surfaced
+# on every card the scanner produces, which is the point: a fair value built
+# on a two-year-old multiple should say so on its face.
+#
+# Sector names must match the provider's sector strings exactly; an
+# unrecognised sector falls back to default_multiples.
+
+last_reviewed: 2026-08-15
+
+default_multiples: {pe_bull: 18.0, pe_bear: 12.0, ev_ebitda_bull: 17.0, ev_ebitda_bear: 12.0}
+
+sector_multiples:
+  Technology:             {pe_bull: 22.0, pe_bear: 16.0, ev_ebitda_bull: 21.0, ev_ebitda_bear: 15.0}
+  Communication Services: {pe_bull: 20.0, pe_bear: 14.0, ev_ebitda_bull: 19.0, ev_ebitda_bear: 14.0}
+  Consumer Cyclical:      {pe_bull: 18.0, pe_bear: 12.0, ev_ebitda_bull: 17.0, ev_ebitda_bear: 12.0}
+  Consumer Defensive:     {pe_bull: 19.0, pe_bear: 15.0, ev_ebitda_bull: 18.0, ev_ebitda_bear: 14.0}
+  Healthcare:             {pe_bull: 20.0, pe_bear: 14.0, ev_ebitda_bull: 19.0, ev_ebitda_bear: 14.0}
+  Industrials:            {pe_bull: 18.0, pe_bear: 12.0, ev_ebitda_bull: 17.0, ev_ebitda_bear: 12.0}
+  Financial Services:     {pe_bull: 14.0, pe_bear: 10.0, ev_ebitda_bull: 14.0, ev_ebitda_bear: 10.0}
+  Energy:                 {pe_bull: 13.0, pe_bear:  8.0, ev_ebitda_bull: 12.0, ev_ebitda_bear:  8.0}
+  Real Estate:            {pe_bull: 16.0, pe_bear: 11.0, ev_ebitda_bull: 15.0, ev_ebitda_bear: 10.0}
+  Utilities:              {pe_bull: 17.0, pe_bear: 13.0, ev_ebitda_bull: 16.0, ev_ebitda_bear: 12.0}
+  Basic Materials:        {pe_bull: 14.0, pe_bear:  9.0, ev_ebitda_bull: 13.0, ev_ebitda_bear:  9.0}

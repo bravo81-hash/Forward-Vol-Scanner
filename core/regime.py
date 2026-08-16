@@ -4,6 +4,7 @@ Inputs: daily OHLC bars + an IV30 history series (live: TWS historical
 OPTION_IMPLIED_VOLATILITY, one cached request; mock: synthetic).
 """
 from __future__ import annotations
+
 import math
 import random
 import zlib
@@ -79,13 +80,13 @@ def _autocorr(closes, n=20):
     rs = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))][-n - 1:]
     a, b = rs[1:], rs[:-1]
     ma, mb = sum(a) / len(a), sum(b) / len(b)
-    cov = sum((x - ma) * (y - mb) for x, y in zip(a, b))
+    cov = sum((x - ma) * (y - mb) for x, y in zip(a, b, strict=False))
     den = math.sqrt(sum((x - ma) ** 2 for x in a) * sum((y - mb) ** 2 for y in b))
     return cov / den if den else 0.0
 
 
 def _parkinson(highs, lows, n=10):
-    hl = [math.log(h / l) ** 2 for h, l in zip(highs[-n:], lows[-n:])]
+    hl = [math.log(h / l) ** 2 for h, l in zip(highs[-n:], lows[-n:], strict=False)]
     return math.sqrt(sum(hl) / n / (4 * math.log(2))) * math.sqrt(252) * 100
 
 

@@ -1,10 +1,12 @@
 from core.models import Context, Suggestion
 from core.surface import FOMC_HIST_MOVE_PCT, HARVEST_MIN_RATIO
+
 from .base import Strategy
 
 
 class Calendar(Strategy):
     key, name = "calendar", "Calendar"
+    multi_expiry = True
     delta_band = (-0.10, 0.10)
 
     def propose(self, ctx: Context) -> list[Suggestion]:

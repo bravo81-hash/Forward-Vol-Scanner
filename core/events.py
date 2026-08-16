@@ -1,5 +1,6 @@
 """Embedded event calendar + OpEx/ex-div math. UPDATE FOMC EACH JANUARY."""
 from __future__ import annotations
+
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 

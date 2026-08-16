@@ -12,10 +12,10 @@ import json
 
 from config.loader import account_profile, hypothesis
 from portfolio.governor import evaluate_candidate
+from selection.constants import MULTI_EXPIRY
 from selection.manage import management_plan
 from strategies import REGISTRY
 
-MULTI_EXPIRY = {"calendar", "double_calendar", "diagonal"}
 INCOME_OR_SHORT_FRONT = {
     "calendar", "double_calendar", "diagonal", "condor", "bwb", "butterfly",
     "balanced_fly", "iron_fly", "otm_put_fly", "call_bwb", "m3_bwb_call",

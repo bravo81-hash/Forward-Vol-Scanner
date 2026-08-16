@@ -8,8 +8,7 @@ from pathlib import Path
 import yaml
 
 from .engine import Company, quality_company, value_company
-from .providers import MOCK_COMPANIES, mock_company_snapshot, yahoo_company_snapshot
-
+from .providers import MOCK_COMPANIES, is_transient, mock_company_snapshot, with_retry, yahoo_company_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 UNIVERSE_FILE = ROOT / "config" / "stock_universe.yaml"
@@ -202,7 +201,8 @@ def discover_value_universe(
     errors: list[dict] = []
     workers = 1 if source == "mock" else 6
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        jobs = {pool.submit(provider, symbol): symbol for symbol in symbols}
+        jobs = {pool.submit(with_retry, provider, symbol): symbol
+                for symbol in symbols}
         for future in as_completed(jobs):
             symbol = jobs[future]
             try:
@@ -217,7 +217,12 @@ def discover_value_universe(
                     max_price_to_fcf=max_price_to_fcf,
                 ))
             except Exception as exc:  # noqa: BLE001
-                errors.append({"symbol": symbol, "error": str(exc)})
+                # Distinguish "this company failed the screen" from "we never
+                # saw this company": a fetch failure is a hole in the
+                # universe, not a clean exclusion.
+                errors.append({"symbol": symbol, "error": str(exc),
+                               "kind": "fetch_failed",
+                               "transient": is_transient(exc)})
 
     status_order = {"ELIGIBLE": 0, "REVIEW": 1, "EXCLUDED": 2}
     rows.sort(key=lambda row: (
@@ -246,6 +251,10 @@ def discover_value_universe(
             "selected": len(selected),
             **counts,
             "data_errors": len(errors),
+            "fetch_failed": [e["symbol"] for e in errors],
+            "coverage_pct": (round(100.0 * len(rows) / len(symbols), 1)
+                             if symbols else None),
+            "universe_complete": not errors,
         },
         "filters": {
             "min_market_cap": min_market_cap,

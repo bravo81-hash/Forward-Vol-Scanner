@@ -1,5 +1,6 @@
 """Upside call broken-wing butterfly: entry row and standing upside repair."""
 from core.models import Context, Suggestion
+
 from .base import Strategy
 
 

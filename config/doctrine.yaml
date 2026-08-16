@@ -1,0 +1,60 @@
+# Doctrine thresholds.
+#
+# Everything here used to be a module-level literal scattered across
+# selection/, core/ and portfolio/. They are the numbers that encode the
+# trading doctrine rather than the mechanics, so they belong in one auditable
+# place: a doctrine change should be an edit here, not a hunt through twelve
+# files. Every key is read through config.loader with the previous literal as
+# the fallback default, so an incomplete file degrades to the old behaviour
+# instead of crashing.
+#
+# last_reviewed is surfaced on the cards that depend on the block, so stale
+# calibration is visible in the UI rather than implicit.
+
+direction:
+  last_reviewed: 2026-08-15
+  # Forward VRP (vol points) that makes selling / buying vol the play.
+  sell_vrp: 3.0
+  buy_vrp: -2.0
+  # IV30 / HAR ratio bands used when a single name has no IV history.
+  proxy_elevated_ratio: 1.20
+  proxy_compressed_ratio: 0.90
+  # Reported as "marginal" when an input sits within this much of a branch
+  # boundary — see selection.direction.matrix_confidence.
+  margin_vrp: 0.75          # vol pts
+  margin_ratio: 0.05        # IV30/HAR ratio
+  margin_iv_pctl: 5.0       # percentile points
+  margin_rr25_pct: 0.03     # rr25 as a fraction of ATM IV
+
+smsf:
+  last_reviewed: 2026-08-15
+  # rr25 below this (put IV under call IV) means the call side is the bid.
+  call_skew_bid: -0.5
+  # Dead band around call_skew_bid. Without it the variant ordering flapped
+  # every time rr25 oscillated across a single hard threshold.
+  call_skew_deadband: 0.25
+
+harvest:
+  last_reviewed: 2026-08-15
+  # SPX FOMC-day |move| averages ~0.8-1.0%.
+  fomc_hist_move_pct: 0.9
+  # Implied event move must clear the historical move by this ratio.
+  harvest_min_ratio: 1.25
+  # Event harvest is allowed down to this forward VRP only.
+  vrp_harvest_floor: -1.5
+
+risk:
+  last_reviewed: 2026-07-01
+  # Risk-Navigator units, per $100k of account NLV.
+  # Recalibrated Jul 2026: the old 0.30 delta band read a 14-delta book on
+  # $215k as "neutral" (~200% of NLV in delta dollars).
+  budget_per_100k:
+    vega: 1200.0      # $ per 1 vol point (== 1.2% NLV per vol point)
+    delta: 5.0        # underlying deltas (~34% NLV delta-dollars at SPX ~6800)
+    theta_min: 0.0    # net theta ($/day) stays >= 0 for a harvest book
+
+execution:
+  # Reject an identical staging request repeated inside this window.
+  stage_idempotency_window_s: 20
+  # Fallback combo tick when the contract's own minTick is unavailable.
+  default_tick: 0.05

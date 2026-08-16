@@ -8,9 +8,16 @@ from zoneinfo import ZoneInfo
 
 from core.events import trading_today, upcoming_tier1
 from core.price_action import enrich_ideas, fetch_feed, practice_feed
-from selection.stock_radar import (ACTIVE_LIMIT, POOL_LIMIT, RESEARCH_LIMIT,
-                                   POLICY_ID, analyse_symbol, apply_earnings,
-                                   load_universe, rank_ideas)
+from selection.stock_radar import (
+    ACTIVE_LIMIT,
+    POLICY_ID,
+    POOL_LIMIT,
+    RESEARCH_LIMIT,
+    analyse_symbol,
+    apply_earnings,
+    load_universe,
+    rank_ideas,
+)
 
 NY = ZoneInfo("America/New_York")
 
@@ -250,6 +257,7 @@ def quotes_yf(symbols: list[str]) -> dict[str, dict]:
 
 def quotes_tws(ib, symbols: list[str]) -> dict[str, dict]:
     from ib_insync import Stock
+
     from core.ib_client import quote_many
     contracts = [Stock(symbol, "SMART", "USD") for symbol in symbols]
     ib.qualifyContracts(*contracts)

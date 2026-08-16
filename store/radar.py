@@ -1,11 +1,11 @@
 """Durable daily/Friday watchlists for the Stock Opportunity Radar."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
 import time
-import hashlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -279,6 +279,56 @@ class RadarStore:
                                 GROUP BY s.cohort,o.horizon_days
                                 ORDER BY s.cohort,o.horizon_days""").fetchall()
         return [dict(x) for x in rows]
+
+    def outcome_summary(self) -> dict:
+        """Hit rates from the shadow ledger.
+
+        `evidence_summary` reports average moves; that is not the question a
+        suggester has to answer. These are the rates: how often a triggered
+        candidate paid, how often it reached target before invalidation, and
+        what the average winner and loser were worth — which is what turns
+        the radar from a list of ideas into an evidenced one.
+        """
+        by_cohort_sql = """
+            SELECT s.cohort, o.horizon_days,
+                   COUNT(*)                                        AS samples,
+                   ROUND(100.0 * AVG(CASE WHEN o.return_pct > 0 THEN 1.0 ELSE 0.0 END), 1)
+                                                                   AS win_rate_pct,
+                   ROUND(100.0 * AVG(o.target_hit), 1)             AS target_hit_pct,
+                   ROUND(100.0 * AVG(o.invalidation_hit), 1)       AS invalidation_hit_pct,
+                   ROUND(AVG(CASE WHEN o.return_pct > 0 THEN o.return_pct END), 3)
+                                                                   AS avg_win_pct,
+                   ROUND(AVG(CASE WHEN o.return_pct <= 0 THEN o.return_pct END), 3)
+                                                                   AS avg_loss_pct,
+                   ROUND(AVG(o.return_pct), 3)                     AS expectancy_pct
+            FROM radar_outcomes o
+            JOIN radar_shadow_candidates s ON s.id = o.shadow_id
+            GROUP BY s.cohort, o.horizon_days
+            ORDER BY s.cohort, o.horizon_days"""
+        # Did the ideas actually staged do better than the ones only watched?
+        taken_sql = """
+            SELECT CASE WHEN e.symbol IS NULL THEN 'watched' ELSE 'taken' END AS bucket,
+                   o.horizon_days,
+                   COUNT(*)                                        AS samples,
+                   ROUND(100.0 * AVG(CASE WHEN o.return_pct > 0 THEN 1.0 ELSE 0.0 END), 1)
+                                                                   AS win_rate_pct,
+                   ROUND(AVG(o.return_pct), 3)                     AS expectancy_pct
+            FROM radar_outcomes o
+            JOIN radar_shadow_candidates s ON s.id = o.shadow_id
+            LEFT JOIN (SELECT DISTINCT symbol, session FROM radar_entries) e
+                   ON e.symbol = s.symbol AND e.session = s.source_session
+            GROUP BY bucket, o.horizon_days
+            ORDER BY bucket, o.horizon_days"""
+        with self.connect() as c:
+            by_cohort = [dict(x) for x in c.execute(by_cohort_sql).fetchall()]
+            taken = [dict(x) for x in c.execute(taken_sql).fetchall()]
+            tracked = c.execute("SELECT COUNT(*) FROM radar_shadow_candidates").fetchone()[0]
+            triggered = c.execute("SELECT COUNT(*) FROM radar_shadow_candidates "
+                                  "WHERE triggered_session IS NOT NULL").fetchone()[0]
+        return {"by_cohort": by_cohort, "taken_vs_watched": taken,
+                "tracked": int(tracked), "triggered": int(triggered),
+                "trigger_rate_pct": (round(100.0 * triggered / tracked, 1)
+                                     if tracked else None)}
 
 
 _STORE: RadarStore | None = None

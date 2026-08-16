@@ -24,12 +24,13 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from core.events import trading_today
 
 import numpy as np
 import pandas as pd
+
+from core.events import trading_today
 
 # ----------------------------------------------------------------- CONFIG ---
 

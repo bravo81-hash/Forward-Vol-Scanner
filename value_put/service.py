@@ -3,12 +3,17 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .engine import choose_candidates
-from .providers import mock_symbol, yahoo_symbol
-
+from .engine import MULTIPLES_REVIEWED, choose_candidates
+from .providers import is_transient, mock_symbol, with_retry, yahoo_symbol
 
 DEFAULT_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "BAC", "JPM", "XOM", "AAL"]
 VALID_MODES = {"cash_secured", "margin_efficient", "defined_risk"}
+
+
+def _scan_one_retrying(symbol: str, **kwargs):
+    """Retry transient upstream failures so a rate-limited sweep does not
+    silently return a partial shortlist as if it were the whole universe."""
+    return with_retry(_scan_one, symbol, **kwargs)
 
 
 def _scan_one(symbol: str, *, source: str, mode: str, overrides: dict,
@@ -48,7 +53,7 @@ def scan_value_puts(*, symbols: list[str] | None = None, source: str = "mock",
     workers = min(4, max(len(symbols), 1)) if source == "yf" else 1
     with ThreadPoolExecutor(max_workers=workers) as pool:
         jobs = {
-            pool.submit(_scan_one, symbol, source=source, mode=mode,
+            pool.submit(_scan_one_retrying, symbol, source=source, mode=mode,
                         overrides=overrides, hurdle_rate=hurdle_rate, nlv=nlv,
                         available_cash=available_cash, sector_capacity=sector_capacity,
                         min_dte=min_dte, max_dte=max_dte): symbol
@@ -58,7 +63,9 @@ def scan_value_puts(*, symbols: list[str] | None = None, source: str = "mock",
             try:
                 rows.append(future.result())
             except Exception as exc:  # noqa: BLE001
-                errors.append({"symbol": jobs[future], "error": str(exc)})
+                errors.append({"symbol": jobs[future], "error": str(exc),
+                               "kind": "fetch_failed",
+                               "transient": is_transient(exc)})
     status_order = {"QUALIFIED": 0, "WATCH": 1, "SPECULATIVE": 2, "REJECTED": 3}
     rows.sort(key=lambda row: (
         status_order.get((row.get("candidate") or {}).get("status"), 4),
@@ -68,7 +75,12 @@ def scan_value_puts(*, symbols: list[str] | None = None, source: str = "mock",
               for key in status_order}
     return {
         "policy_id": "value-entry-put-v1", "source": source, "mode": mode,
-        "rows": rows, "errors": errors, "summary": {
+        "rows": rows, "errors": errors,
+        "valuation_multiples_reviewed": MULTIPLES_REVIEWED,
+        "coverage": {"requested": len(symbols), "scanned": len(rows),
+                     "fetch_failed": [e["symbol"] for e in errors],
+                     "complete": not errors},
+        "summary": {
             "symbols_requested": len(symbols), "symbols_scanned": len(rows),
             **{key.lower(): value for key, value in counts.items()},
             "assignment_capital": round(sum(

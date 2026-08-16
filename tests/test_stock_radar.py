@@ -1,5 +1,5 @@
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -12,8 +12,7 @@ from core.price_action import enrich_ideas, validate_feed
 from core.reprice import assess_liquidity
 from core.stock_data import scan_stocks
 from execution.stock_orders import approve_lots, make_stageable
-from selection.stock_radar import (apply_earnings, monthly_expiry_near,
-                                   rank_ideas, trigger_state)
+from selection.stock_radar import apply_earnings, monthly_expiry_near, rank_ideas, trigger_state
 from stock_radar import _account_profile, _live_selection, due_cadences
 from store.radar import RadarStore
 
@@ -37,7 +36,7 @@ def test_mock_scan_returns_active_five_and_up_to_five_reserves():
 
 
 def test_price_action_feed_is_freshness_checked_and_context_only():
-    now = datetime(2026, 7, 21, 20, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 21, 20, tzinfo=UTC)
     base = {"schema_version": 1, "market": "us", "authority": "context_only",
             "generated": "2026-07-20T23:30:00Z", "rows": []}
     assert validate_feed(base, now=now)["status"] == "FRESH"
@@ -236,8 +235,8 @@ def test_shadow_outcomes_log_all_requested_horizons(tmp_path):
 
 def test_stock_radar_endpoints_mock(monkeypatch, tmp_path):
     monkeypatch.setenv("FVS_CAMPAIGN_DB", str(tmp_path / "radar.sqlite"))
-    import store.radar as radar_module
     import store.campaigns as campaign_module
+    import store.radar as radar_module
     radar_module._STORE = None
     campaign_module._STORE = None
     import webapp

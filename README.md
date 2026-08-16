@@ -329,6 +329,10 @@ limit, and a failed live scan identifies the connection or market-data stage.
 pip install -r requirements.txt
 python webapp.py            # -> http://127.0.0.1:8765
 ```
+`webapp.py` serves through waitress when it is installed (`pip install -r
+requirements-live.txt`) and falls back to the Flask development server with a
+warning otherwise. Scan and job state is durable (`store/*.sqlite`), so more
+than one worker thread is safe.
 Historical OptionNet mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
 (edit `core/ib_client.py`).
 
@@ -336,16 +340,20 @@ All trading-date logic anchored to America/New_York via `core.events.trading_tod
 
 ## Layout
 ```
-core/        models · pricing (BS) · ib_client (pacing/caches) · chain ·
+core/        models · pricing (BS, memoised) · ib_client (pacing/bounded
+             caches) · barcache (durable daily-bar cache) · chain ·
              surface (fwd-vol pairs, term) · regime (TE Console port) ·
              events (FOMC/OpEx/ex-div) · context (single data touchpoint)
 strategies/  one module per family, uniform propose(ctx) -> [Suggestion]
 selection/   current ranker + Gate S + unified v3 selector + strategy lab
 portfolio/   book greeks, signed governor, account aggregation, stress
 execution/   immutable candidate validation + N-leg staging; never transmits
-store/       scan audit + campaign/candidate/manual-test ledger
+store/       scan audit + campaign/candidate/manual-test ledger +
+             pattern-scan/job store + radar ledger
 management/  deterministic campaign action engine
 validation/  manual evidence and captured-context replay summaries
+web/         Flask blueprints, one per feature area; web/shared.py is the
+             single seam for context building and TWS access
 static/      TE browser UI + Campaign v3 testing UI
 tests/       mock-mode suite: python -m pytest tests/
 ```
@@ -405,8 +413,25 @@ of suggestions.
   valued with the same model pricing as the book greeks.
 
 ## Maintenance
+Doctrine thresholds live in config, not in module literals. Each block carries
+a `last_reviewed` date that the dependent cards display.
+* `config/doctrine.yaml` — Direction VRP cutoffs, SMSF skew band, FOMC harvest
+  ratio/floor, risk budgets, execution tick and staging idempotency window
+* `config/valuation.yaml` — Value Entry Put sector multiples
 * `core/events.py` — update FOMC dates each January
-* `portfolio/risk.py` — tune vega/delta/theta budgets to account size
+* `portfolio/risk.py` — budgets read from `config/doctrine.yaml`; the July 2026
+  delta-band recalibration is pinned by `tests/test_risk_budget.py`
+
+## TWS preflight
+Before staging on a machine that has TWS running, verify the live-only paths:
+```
+python tools/tws_preflight.py --symbol SPX
+```
+Read-only — it qualifies contracts and reads account values, and never places
+an order (not even a whatIf). It reports whether TWS populates `minTick` (the
+staging limit price now comes from the contract rather than a hardcoded 0.05),
+whether AvailableFunds is present for the Gate S cash check, and whether the
+listed expiries force the TimeEdge tolerance fallback this week.
 
 ## Disclaimer
 Model prices are skew-interpolated Black-Scholes from ATM/25Δ quotes —

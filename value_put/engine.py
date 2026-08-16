@@ -6,10 +6,14 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import date
 
-
 RISK_FREE_RATE = 0.045
 
-SECTOR_MULTIPLES = {
+# Sector valuation multiples (bull P/E, bear P/E, bull EV/EBITDA, bear
+# EV/EBITDA). These are a point-in-time calibration that goes stale through a
+# sector re-rating, so they live in config/valuation.yaml with a
+# `last_reviewed` date that the scanner surfaces on every card. The literals
+# below remain the documented fallback.
+_FALLBACK_MULTIPLES = {
     "Technology": (22.0, 16.0, 21.0, 15.0),
     "Communication Services": (20.0, 14.0, 19.0, 14.0),
     "Consumer Cyclical": (18.0, 12.0, 17.0, 12.0),
@@ -22,7 +26,35 @@ SECTOR_MULTIPLES = {
     "Utilities": (17.0, 13.0, 16.0, 12.0),
     "Basic Materials": (14.0, 9.0, 13.0, 9.0),
 }
-DEFAULT_MULTIPLES = (18.0, 12.0, 17.0, 12.0)
+_FALLBACK_DEFAULT = (18.0, 12.0, 17.0, 12.0)
+
+
+def _load_multiples() -> tuple[dict, tuple, str | None]:
+    try:
+        from config.loader import valuation_config
+        cfg = valuation_config()
+    except Exception:  # noqa: BLE001 - config problems must not break pricing
+        return dict(_FALLBACK_MULTIPLES), _FALLBACK_DEFAULT, None
+    sectors = cfg.get("sector_multiples") or {}
+    parsed = {}
+    for name, row in sectors.items():
+        try:
+            parsed[str(name)] = (float(row["pe_bull"]), float(row["pe_bear"]),
+                                 float(row["ev_ebitda_bull"]), float(row["ev_ebitda_bear"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    default = cfg.get("default_multiples") or {}
+    try:
+        fallback = (float(default["pe_bull"]), float(default["pe_bear"]),
+                    float(default["ev_ebitda_bull"]), float(default["ev_ebitda_bear"]))
+    except (KeyError, TypeError, ValueError):
+        fallback = _FALLBACK_DEFAULT
+    reviewed = cfg.get("last_reviewed")
+    return (parsed or dict(_FALLBACK_MULTIPLES), fallback,
+            str(reviewed) if reviewed else None)
+
+
+SECTOR_MULTIPLES, DEFAULT_MULTIPLES, MULTIPLES_REVIEWED = _load_multiples()
 
 
 def _finite(value, default=None):

@@ -15,8 +15,7 @@ from execution.candidates import validate_for_stage, within_execution_window
 from execution.stage import stage_suggestion
 from execution.stock_orders import make_stageable, snap_vertical_live
 from portfolio.accounts import list_accounts
-from selection.stock_radar import (ACTIVE_LIMIT, POLICY_ID, challenger_rank,
-                                   model_card, trigger_state)
+from selection.stock_radar import ACTIVE_LIMIT, POLICY_ID, challenger_rank, model_card, trigger_state
 from store.campaigns import campaign_store
 from store.radar import radar_store
 
@@ -405,6 +404,7 @@ def evidence(refresh: bool = False) -> dict:
         update = store.update_outcomes(histories_yf(store.shadow_symbols()))
     return {"policy_id": POLICY_ID, "update": update,
             "summary": store.evidence_summary(),
+            "outcomes": store.outcome_summary(),
             "false_breakout_definition":
                 "Next trading-day close back through the trigger, or invalidation hit before target."}
 

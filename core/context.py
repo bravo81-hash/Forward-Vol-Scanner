@@ -6,6 +6,7 @@ Normal live-refresh budget, per symbol:
   TWS history is used only when the free preload is unavailable.
 """
 from __future__ import annotations
+
 from datetime import date
 
 from .chain import SURFACE_CFG, build_chain_live, build_chain_mock
@@ -13,8 +14,8 @@ from .events import event_flags, trading_clock, trading_today
 from .historical import free_daily_inputs
 from .ib_client import BARS_CACHE, daily_bars, with_ib
 from .models import Context
-from .regime import build_gates, compute_regime, mock_bars, mock_iv_hist
 from .pricing import q_for
+from .regime import build_gates, compute_regime, mock_bars, mock_iv_hist
 from .surface import FRONT_DTE, iv_cm, pair_table, term_stats
 
 

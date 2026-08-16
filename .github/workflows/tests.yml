@@ -16,5 +16,34 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest -q
-      - run: ruff check campaign config execution/candidates.py management portfolio/governor.py selection/campaign_ranker.py selection/lab.py selection/unified.py store/campaigns.py strategies/call_bwb.py strategies/debit_spread.py strategies/fly_variants.py strategies/m3_bwb_call.py validation webapp.py tests/test_v3_*.py
-      - run: python -m compileall -q core strategies selection portfolio execution store management validation campaign config webapp.py
+      # Lint the whole repo. This used to be a hand-maintained path list, which
+      # left core/, pattern_scanner/, value_put/, sentinel.py and stock_radar.py
+      # unlinted; config lives in pyproject.toml.
+      - run: ruff check .
+      # Every package must import cleanly, not merely byte-compile: compileall
+      # would not have caught a name that went missing in a refactor.
+      - run: |
+          python - <<'PY'
+          import importlib, pkgutil, sys
+          packages = ["core", "strategies", "selection", "portfolio", "execution",
+                      "store", "management", "validation", "campaign", "config",
+                      "pattern_scanner", "value_put", "web"]
+          failed = []
+          for package in packages:
+              importlib.import_module(package)
+              for info in pkgutil.iter_modules(sys.modules[package].__path__):
+                  name = f"{package}.{info.name}"
+                  try:
+                      importlib.import_module(name)
+                  except Exception as exc:
+                      failed.append(f"{name}: {type(exc).__name__}: {exc}")
+          for module in ("webapp", "sentinel", "stock_radar", "snapshot", "fwdvol_scanner"):
+              try:
+                  importlib.import_module(module)
+              except Exception as exc:
+                  failed.append(f"{module}: {type(exc).__name__}: {exc}")
+          if failed:
+              print("\n".join(failed))
+              sys.exit(1)
+          print("all modules import cleanly")
+          PY

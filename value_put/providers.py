@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
+import random
 import statistics
+import time
 from datetime import date, datetime, timedelta
 
 from .engine import Company, OptionQuote, bs_put
-
 
 MOCK_COMPANIES = {
     "AAPL": dict(name="Apple", sector="Technology", spot=228.0, market_cap=3.4e12,
@@ -119,7 +121,7 @@ def _realized_vol(history) -> float | None:
     if history is None or len(history) < 65:
         return None
     closes = [float(value) for value in history["Close"].dropna().tolist()]
-    returns = [math.log(b / a) for a, b in zip(closes[-61:-1], closes[-60:])
+    returns = [math.log(b / a) for a, b in zip(closes[-61:-1], closes[-60:], strict=False)
                if a > 0 and b > 0]
     return statistics.stdev(returns) * math.sqrt(252) if len(returns) >= 30 else None
 
@@ -182,6 +184,41 @@ def _yahoo_company_snapshot(symbol: str):
         "exchange": info.get("exchange") or info.get("fullExchangeName"),
     }
     return company, metadata, ticker
+
+
+#: Yahoo rate-limits an 8-worker sweep, and the previous code turned a 429
+#: into a dropped company. A partial universe then looked exactly like a
+#: clean screen, so retry transient failures and let the caller classify
+#: whatever is left.
+FETCH_ATTEMPTS = int(os.getenv("FVS_YF_ATTEMPTS", "3"))
+FETCH_BACKOFF_S = float(os.getenv("FVS_YF_BACKOFF_S", "1.5"))
+_TRANSIENT_MARKERS = ("rate limit", "too many requests", "429", "timed out",
+                      "timeout", "temporarily", "connection", "503", "502",
+                      "remote end closed", "max retries")
+
+
+def is_transient(exc: Exception) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker in text for marker in _TRANSIENT_MARKERS)
+
+
+def with_retry(fn, *args, attempts: int = FETCH_ATTEMPTS,
+               backoff_s: float = FETCH_BACKOFF_S, **kwargs):
+    """Call `fn`, retrying transient upstream failures with exponential backoff.
+
+    Non-transient errors (an unknown ticker, a missing field) raise on the
+    first attempt — retrying those just multiplies the wait.
+    """
+    last = None
+    for attempt in range(1, max(attempts, 1) + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            if attempt >= attempts or not is_transient(exc):
+                raise
+            time.sleep(backoff_s * (2 ** (attempt - 1)) + random.uniform(0, 0.25))
+    raise last  # pragma: no cover - loop always returns or raises
 
 
 def yahoo_company_snapshot(symbol: str) -> tuple[Company, dict]:

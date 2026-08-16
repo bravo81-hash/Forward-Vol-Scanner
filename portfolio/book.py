@@ -1,6 +1,7 @@
 """Live book per symbol from TWS positions; greeks via model pricing."""
 from __future__ import annotations
-from datetime import date, datetime
+
+from datetime import datetime
 
 from core.chain import iv_at
 from core.ib_client import quote_many
@@ -63,7 +64,7 @@ def book_greeks(ctx: Context, positions: list[dict]) -> dict:
     # UNITS: Risk-Navigator convention (x contract multiplier) — delta in
     # underlying deltas, theta $/day, vega $/vol-pt, gamma deltas-per-point.
     # TWS Risk Navigator 14 deltas == 14 here (was 0.14 pre-fix).
-    in_window = [p for p, l in zip(positions, all_legs)
+    in_window = [p for p, l in zip(positions, all_legs, strict=False)
                  if (l.expiry - ctx.today).days <= CAMPAIGN_MAX_DTE]
     live = [p.get("greeks") for p in in_window]
     if legs and all(isinstance(x, dict) and "delta" in x for x in live):

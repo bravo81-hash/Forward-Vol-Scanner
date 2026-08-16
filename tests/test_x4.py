@@ -55,6 +55,7 @@ def test_x4_waits_when_front_term_is_inverted():
 
 def test_x4_page_and_mock_api_are_available():
     import webapp
+    from web import shared
 
     client = webapp.app.test_client()
     assert client.get("/x4").status_code == 200
@@ -69,6 +70,7 @@ def test_x4_page_and_mock_api_are_available():
 
 def test_x4_live_api_reprices_exact_candidates(monkeypatch):
     import webapp
+    from web import shared
 
     ctx = _ctx()
     ctx.mode = "live"
@@ -76,16 +78,16 @@ def test_x4_live_api_reprices_exact_candidates(monkeypatch):
                     as_of_time="15:30:00", captured_at="live-test")
     profile = {"account": "DU123", "nlv": 100_000, "cash_account": False,
                "block_multi_expiry": False}
-    monkeypatch.setattr(webapp, "_v3_context",
+    monkeypatch.setattr(shared, "v3_context",
                         lambda *args, **kwargs: (ctx, profile, []))
-    monkeypatch.setattr(webapp, "with_ib", lambda fn: fn(object()))
+    monkeypatch.setattr(shared, "with_ib", lambda fn: fn(object()))
 
     def fake_reprice(_ib, _symbol, _spot, _today, cards, **_kwargs):
         for card in cards:
             card["mid_src"] = "live"
             card["net_mid"] = -1.25
 
-    monkeypatch.setattr(webapp, "reprice_cards", fake_reprice)
+    monkeypatch.setattr(shared, "reprice_cards", fake_reprice)
     data = webapp.app.test_client().get(
         "/api/x4/build?symbol=SPX&mode=live&account=DU123").get_json()
     assert data["live_capture"]["status"] == "TWS_CONNECTED"

@@ -2,8 +2,17 @@
 import unittest
 
 from sentinel import (
-    Direction, VolState, Side, RegimeView, BookView, budget_for,
-    detect_conflicts, suggest, advise, print_reference, STRUCTURE_GREEKS,
+    STRUCTURE_GREEKS,
+    BookView,
+    Direction,
+    RegimeView,
+    Side,
+    VolState,
+    advise,
+    budget_for,
+    detect_conflicts,
+    print_reference,
+    suggest,
 )
 
 

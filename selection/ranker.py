@@ -11,12 +11,12 @@ to stand aside; they don't make that decision for them.
 """
 from __future__ import annotations
 
+from config.loader import doctrine
 from core.models import Context, Suggestion
 from core.surface import event_premium
+from selection.constants import MULTI_EXPIRY  # F1: SMSF-blockable
 from selection.manage import management_plan
 from strategies import REGISTRY
-
-MULTI_EXPIRY = {"calendar", "double_calendar", "diagonal"}   # F1: SMSF-blockable
 
 
 def verdict_size(verdict: str, regime: dict, gates: list[dict]) -> str:
@@ -32,7 +32,8 @@ def verdict_size(verdict: str, regime: dict, gates: list[dict]) -> str:
         return "HALF"
     return "FULL"
 
-VRP_HARVEST_FLOOR = -1.5    # event harvest allowed down to this VRP only
+VRP_HARVEST_FLOOR = doctrine(   # event harvest allowed down to this VRP only
+    "harvest", "vrp_harvest_floor", -1.5)
 FRIDAY_OK = {"calendar", "double_calendar", "diagonal"}   # net-debit long-vega
 
 

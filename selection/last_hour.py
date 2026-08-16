@@ -12,9 +12,8 @@ from core.models import Leg
 from core.pricing import q_for, risk_profile
 from execution.optionstrat import optionstrat_url
 from portfolio.governor import evaluate_candidate
+from selection.constants import LAST_HOUR_MULTI_EXPIRY as MULTI_EXPIRY
 from strategies.last_hour import LAST_HOUR_REGISTRY
-
-MULTI_EXPIRY = {"timeedge", "timezone"}
 
 PLAYBOOK = {
     "fly_bull": {

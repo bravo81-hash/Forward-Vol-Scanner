@@ -1,8 +1,8 @@
 """Strategy contract + shared construction helpers."""
 from __future__ import annotations
+
 import math
 from abc import ABC, abstractmethod
-from datetime import date
 
 from core.chain import iv_at
 from core.models import Context, Leg, Slice, Suggestion
@@ -18,6 +18,11 @@ class Strategy(ABC):
     hypothesis_id: str | None = None
     evidence_status = "ACTIVE"
     policy_id = "legacy-v1"
+    #: True when the structure spans more than one expiry. Cash accounts
+    #: (IBKR SMSF) cannot hold EU cash-settled multi-expiry combos, so this
+    #: is the single source of truth for that block — it used to be three
+    #: hand-maintained literal sets in selection/ that had already drifted.
+    multi_expiry = False
 
     @abstractmethod
     def propose(self, ctx: Context) -> list[Suggestion]:
@@ -105,7 +110,29 @@ class Strategy(ABC):
         return min(pool, key=lambda s: abs(s.dte - target)) if pool else None
 
     @staticmethod
-    def expiry_in(ctx: Context, lo: int, hi: int, target: int) -> Slice | None:
-        """Nearest listed expiry in a strategy-specific DTE window."""
+    def expiry_in(ctx: Context, lo: int, hi: int, target: int,
+                  tol: int = 0) -> Slice | None:
+        """Nearest listed expiry in a strategy-specific DTE window.
+
+        Listed expiries are weekly/Friday-anchored, so a narrow hard window
+        (e.g. 14-18 DTE) is empty on roughly half of all calendar alignments —
+        which silently dropped the structure from the desk rather than
+        reporting it. `tol` widens the window symmetrically as a fallback ONLY
+        when the exact window is empty; callers that need to know use
+        `expiry_in_flagged`.
+        """
+        slc, _ = Strategy.expiry_in_flagged(ctx, lo, hi, target, tol)
+        return slc
+
+    @staticmethod
+    def expiry_in_flagged(ctx: Context, lo: int, hi: int, target: int,
+                          tol: int = 0) -> tuple[Slice | None, bool]:
+        """As `expiry_in`, but also returns whether the tolerance was used."""
         cands = [s for s in ctx.slices if lo <= s.dte <= hi]
-        return min(cands, key=lambda s: abs(s.dte - target)) if cands else None
+        if cands:
+            return min(cands, key=lambda s: abs(s.dte - target)), False
+        if tol > 0:
+            wide = [s for s in ctx.slices if lo - tol <= s.dte <= hi + tol]
+            if wide:
+                return min(wide, key=lambda s: abs(s.dte - target)), True
+        return None, False

@@ -61,7 +61,7 @@ def _atr(bars: list[dict], period: int = 14) -> float:
     if len(rows) < 2:
         return 0.0
     tr = []
-    for prev, row in zip(rows, rows[1:]):
+    for prev, row in zip(rows, rows[1:], strict=False):
         tr.append(max(row["high"] - row["low"],
                       abs(row["high"] - prev["close"]),
                       abs(row["low"] - prev["close"])))
@@ -73,7 +73,7 @@ def _adx(bars: list[dict], period: int = 14) -> float:
     if len(rows) < period + 1:
         return 0.0
     plus, minus, trs = [], [], []
-    for prev, row in zip(rows, rows[1:]):
+    for prev, row in zip(rows, rows[1:], strict=False):
         up, down = row["high"] - prev["high"], prev["low"] - row["low"]
         plus.append(up if up > down and up > 0 else 0.0)
         minus.append(down if down > up and down > 0 else 0.0)

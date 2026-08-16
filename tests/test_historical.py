@@ -4,7 +4,6 @@ import pytest
 
 from core.historical import auto_historical_snapshot
 
-
 AS_OF = date(2025, 3, 17)
 
 

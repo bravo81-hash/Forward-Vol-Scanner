@@ -13,21 +13,15 @@ def evidence_report(store: CampaignStore | None = None) -> dict:
     hypotheses = [{"id": h.get("id"), "name": h.get("name"),
                    "status": h.get("status", "HYPOTHESIS")}
                   for h in hypothesis_config().get("hypotheses", [])]
+    # One indexed join, not a per-campaign fan-out: the previous version read
+    # every campaign (with its events, tests and orders) and decoded every
+    # card JSON in Python to produce these eight columns.
     rows, sessions = [], defaultdict(list)
-    for campaign in store.campaigns(limit=5000):
-        card = campaign.get("card", {})
-        sid = card.get("test_session_id")
-        for test in campaign.get("manual_tests", []):
-            mode = campaign.get("test_mode", "optionnet")
-            row = {"session_id": sid, "test_mode": mode,
-                   "strategy": campaign.get("strategy"),
-                   "market_state": card.get("market_state"), "rank": card.get("rank"),
-                   "result_pct": test.get("result_pct"),
-                   "max_drawdown_pct": test.get("max_drawdown_pct"),
-                   "setup_rating": test.get("setup_rating")}
-            rows.append(row)
-            if sid:
-                sessions[(mode, sid)].append(row)
+    for row in store.manual_test_rows():
+        row["test_mode"] = row.get("test_mode") or "optionnet"
+        rows.append(row)
+        if row.get("session_id"):
+            sessions[(row["test_mode"], row["session_id"])].append(row)
     matched = [{"session_id": sid, "test_mode": mode,
                 "strategies_tested": len({r["strategy"] for r in rs}),
                 "results_recorded": len(rs),

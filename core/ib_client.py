@@ -8,12 +8,14 @@ TWS limits respected here:
   * chain params (reqSecDefOptParams): cached per symbol per session
 """
 from __future__ import annotations
+
 import asyncio
 import itertools
 import math
 import os
 import threading
 import time
+from collections import OrderedDict
 
 MAX_LINES = 40        # concurrent market-data lines per batch (default cap is ~100)
 PACE_S = 0.05         # gap between request submits (50 msg/s API ceiling)
@@ -29,27 +31,52 @@ _client_id_lock = threading.Lock()
 
 
 class TTLCache:
-    def __init__(self, ttl_s: float):
+    """TTL cache with a hard key cap and LRU eviction.
+
+    The previous version only dropped a key when that exact key was read
+    after expiry, so a long-lived process scanning a wide universe grew the
+    dict without bound — chain surfaces are large, and nothing ever swept
+    the keys that were never asked for again.
+    """
+
+    def __init__(self, ttl_s: float, maxsize: int = 256):
         self.ttl = ttl_s
-        self._d: dict = {}
+        self.maxsize = max(int(maxsize), 1)
+        self._d: OrderedDict[object, tuple[float, object]] = OrderedDict()
         self._lock = threading.Lock()
+
+    def _sweep_locked(self, now: float) -> None:
+        stale = [k for k, (ts, _) in self._d.items() if now - ts >= self.ttl]
+        for k in stale:
+            self._d.pop(k, None)
+        while len(self._d) > self.maxsize:
+            self._d.popitem(last=False)      # evict least recently used
 
     def get(self, key):
         with self._lock:
+            now = time.time()
             v = self._d.get(key)
-            if v and time.time() - v[0] < self.ttl:
+            if v and now - v[0] < self.ttl:
+                self._d.move_to_end(key)
                 return v[1]
             self._d.pop(key, None)
             return None
 
     def put(self, key, val):
         with self._lock:
-            self._d[key] = (time.time(), val)
+            now = time.time()
+            self._d[key] = (now, val)
+            self._d.move_to_end(key)
+            self._sweep_locked(now)
+
+    def stats(self) -> dict:
+        with self._lock:
+            return {"size": len(self._d), "maxsize": self.maxsize, "ttl_s": self.ttl}
 
 
-CHAIN_CACHE = TTLCache(300)     # per-expiry surface: 5 min
-BARS_CACHE = TTLCache(3600)     # daily bars: 1 h
-PARAMS_CACHE = TTLCache(6 * 3600)
+CHAIN_CACHE = TTLCache(300, maxsize=128)        # per-expiry surface: 5 min
+BARS_CACHE = TTLCache(3600, maxsize=512)        # daily bars: 1 h
+PARAMS_CACHE = TTLCache(6 * 3600, maxsize=512)
 
 
 TWS_JOB_TIMEOUT = 75

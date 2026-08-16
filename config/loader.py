@@ -27,6 +27,15 @@ def account_config() -> dict:
 
 
 @lru_cache(maxsize=1)
+def valuation_config() -> dict:
+    """Sector valuation multiples for the Value Entry Put Scanner."""
+    try:
+        return _yaml("valuation.yaml")
+    except FileNotFoundError:  # pragma: no cover - deployment without the file
+        return {}
+
+
+@lru_cache(maxsize=1)
 def hypothesis_config() -> dict:
     cfg = _yaml("hypotheses.yaml")
     allowed = set(cfg.get("statuses", []))
@@ -41,6 +50,40 @@ def hypothesis_config() -> dict:
             raise ValueError(f"{hid}: claim and metrics are required")
         seen.add(hid)
     return cfg
+
+
+@lru_cache(maxsize=1)
+def doctrine_config() -> dict:
+    """Doctrine thresholds. Missing file/keys fall back to caller defaults."""
+    try:
+        return _yaml("doctrine.yaml")
+    except FileNotFoundError:  # pragma: no cover - deployment without the file
+        return {}
+
+
+def doctrine(section: str, key: str, default):
+    """One threshold, with the caller's previous literal as the default.
+
+    Deliberately total: a typo or a partial doctrine.yaml degrades to the
+    behaviour that was compiled in before, rather than raising at import
+    time in a module the web app loads eagerly.
+    """
+    block = doctrine_config().get(section)
+    if not isinstance(block, dict) or key not in block:
+        return default
+    value = block[key]
+    if isinstance(default, float):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return value
+
+
+def doctrine_reviewed(section: str) -> str | None:
+    """`last_reviewed` for a doctrine block, for display on dependent cards."""
+    value = doctrine(section, "last_reviewed", None)
+    return str(value) if value is not None else None
 
 
 def account_profile(account: str | None, nlv: float | None = None) -> dict:

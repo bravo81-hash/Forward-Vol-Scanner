@@ -1,8 +1,9 @@
-import numpy as np
-import pandas as pd
 import json
 import threading
 import time
+
+import numpy as np
+import pandas as pd
 
 from pattern_scanner.patterns import PatternCandidate, classify, detect_all
 from pattern_scanner.scanner import (
@@ -259,7 +260,7 @@ def test_pattern_module_page_and_api(monkeypatch):
 
 def test_live_endpoint_reuses_cached_shortlist_without_rerunning_scan(monkeypatch):
     import pattern_scanner.service as service
-    from webapp import app, _pattern_scan_cache
+    from webapp import app
 
     expected = {
         "module": "price_action_patterns", "rows": [{"ticker": "AAPL", "score": .8}],
@@ -274,7 +275,6 @@ def test_live_endpoint_reuses_cached_shortlist_without_rerunning_scan(monkeypatc
         calls["live"] += 1
         return [{**rows[0], "live": 200.0, "live_status": "NEAR_TRIGGER"}], {"fresh": 1, "total": 1, "ok": True}, 0
 
-    _pattern_scan_cache.clear()
     monkeypatch.setattr(service, "run_pattern_scan", scan)
     monkeypatch.setattr(service, "validate_pattern_rows", live)
     client = app.test_client()
@@ -287,8 +287,7 @@ def test_live_endpoint_reuses_cached_shortlist_without_rerunning_scan(monkeypatc
 
 
 def test_live_endpoint_rejects_missing_or_expired_scan():
-    from webapp import app, _pattern_scan_cache
-    _pattern_scan_cache.clear()
+    from webapp import app
     response = app.test_client().post("/api/patterns/live", json={"scan_id": "missing"})
     assert response.status_code == 409
     assert "Run the daily scan again" in response.get_json()["error"]
@@ -296,7 +295,7 @@ def test_live_endpoint_rejects_missing_or_expired_scan():
 
 def test_background_scan_job_avoids_long_lived_http_request(monkeypatch):
     import pattern_scanner.service as service
-    from webapp import app, _pattern_scan_jobs
+    from webapp import app
 
     release = threading.Event()
     expected = {
@@ -309,7 +308,6 @@ def test_background_scan_job_avoids_long_lived_http_request(monkeypatch):
         release.wait(timeout=2)
         return expected
 
-    _pattern_scan_jobs.clear()
     monkeypatch.setattr(service, "run_pattern_scan", scan)
     client = app.test_client()
     started = client.post("/api/patterns/scan/start?source=mock&tickers=AAPL,MSFT")
@@ -393,6 +391,7 @@ def test_known_etf_sector_identity_is_not_guessed_by_correlation():
 def test_yahoo_history_requests_adjusted_prices(monkeypatch):
     import sys
     from types import SimpleNamespace
+
     from core.stock_data import histories_yf
 
     captured = {}

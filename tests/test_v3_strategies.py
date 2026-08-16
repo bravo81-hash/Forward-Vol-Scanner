@@ -1,5 +1,5 @@
-from core.context import build_context
 from config.loader import account_profile
+from core.context import build_context
 from selection.lab import strategy_lab
 from selection.smsf import smsf_shortlist
 from strategies import REGISTRY

@@ -9,6 +9,7 @@ manual-review / hypothesis status.
 from __future__ import annotations
 
 import math
+from datetime import date
 
 from core.models import Context, Leg, Suggestion
 from core.pricing import MULT, struct_greeks, struct_metrics
@@ -21,11 +22,67 @@ def _iv_expected_move(ctx: Context, dte: int, iv: float) -> float:
     return ctx.spot * max(iv, .01) * math.sqrt(max(dte, 1) / 365)
 
 
+PREFERRED_DTE = (60, 85)
+FALLBACK_DTE = (30, 85)
+TARGET_DTE = 77
+
+
 def _slice(ctx: Context):
-    preferred = [s for s in ctx.slices if 60 <= s.dte <= 85]
-    fallback = [s for s in ctx.slices if 30 <= s.dte <= 85]
+    """Nearest listed expiry to the X4 tenor.
+
+    Returns (slice, fell_back). The fallback to 30-85 DTE materially changes
+    the character of the structure — a 35 DTE "V22" is not the published
+    posture — so the caller reports it rather than substituting silently.
+    """
+    preferred = [s for s in ctx.slices
+                 if PREFERRED_DTE[0] <= s.dte <= PREFERRED_DTE[1]]
+    fallback = [s for s in ctx.slices
+                if FALLBACK_DTE[0] <= s.dte <= FALLBACK_DTE[1]]
     pool = preferred or fallback
-    return min(pool, key=lambda s: abs(s.dte - 77)) if pool else None
+    if not pool:
+        return None, False
+    return min(pool, key=lambda s: abs(s.dte - TARGET_DTE)), not preferred
+
+
+#: Legs each published posture is allowed to carry. V22 is the only variant
+#: that pairs the put fly with a long ITM call; the others are all-put.
+POSTURE_SHAPE = {
+    "v14": {"calls": 0, "put_legs": 4},
+    "v17": {"calls": 0, "put_legs": 4},
+    "v22": {"calls": 1, "put_legs": 3},
+}
+
+
+def posture_check(strategy: str, card: dict, legs: list[Leg]) -> list[str]:
+    """Structural invariants each translation must satisfy.
+
+    A thin or stale chain can snap two strikes onto the same listed value, or
+    invert an intended ordering, and quietly produce a structure that is no
+    longer the posture it claims to be. These assert the built legs against
+    the published shape — they make no claim about the market view, so they
+    can be checked without inventing doctrine.
+    """
+    shape = POSTURE_SHAPE.get(strategy, {})
+    flags = []
+    puts = [leg for leg in legs if leg.cp == "P"]
+    calls = [leg for leg in legs if leg.cp == "C"]
+    if shape:
+        if len(calls) != shape["calls"]:
+            flags.append(f"expected {shape['calls']} call leg(s), built {len(calls)}")
+        if len(puts) != shape["put_legs"]:
+            flags.append(f"expected {shape['put_legs']} put leg(s), built {len(puts)}")
+    put_strikes = [leg.strike for leg in puts]
+    if len(set(put_strikes)) != len(put_strikes):
+        flags.append("two put legs snapped to the same listed strike — widen "
+                     "the structure or use a deeper chain")
+    if sorted(put_strikes, reverse=True) != put_strikes:
+        flags.append("put legs are not in descending strike order")
+    if sum(leg.qty for leg in legs) <= 0:
+        flags.append("net long-option count is not positive — the structure "
+                     "is not defined-risk as built")
+    if float(card.get("max_loss") or 0.0) >= 0:
+        flags.append("model max loss is non-negative — check the leg ratios")
+    return flags
 
 
 def _leg(ctx: Context, slc, cp: str, strike: float, qty: int) -> Leg:
@@ -205,7 +262,7 @@ def build_x4(ctx: Context, *, setup: str = "auto", iv_state: str = "auto",
     if posture not in {"bullish", "allweather", "vol"}:
         raise ValueError("posture must be auto, bullish, allweather, or vol")
 
-    slc = _slice(ctx)
+    slc, dte_fell_back = _slice(ctx)
     if not slc:
         raise RuntimeError("no listed option expiry between 30 and 85 DTE")
     em = _iv_expected_move(ctx, slc.dte, slc.atm_iv)
@@ -213,9 +270,18 @@ def build_x4(ctx: Context, *, setup: str = "auto", iv_state: str = "auto",
     cards = [_build_v14(ctx, slc, em, scores["v14"]),
              _build_v17(ctx, slc, em, scores["v17"]),
              _build_v22(ctx, slc, em, scores["v22"])]
+    card_legs = {c["strategy"]: [Leg(cp=leg["cp"], strike=leg["strike"],
+                                     expiry=date.fromisoformat(leg["expiry"]),
+                                     qty=leg["qty"], iv=leg["iv"])
+                                 for leg in c["legs_raw"]] for c in cards}
     cards.sort(key=lambda c: (-c["score"], STRATEGY_ORDER.index(c["strategy"])))
     for rank, card in enumerate(cards, 1):
         card["rank"] = rank
+        posture_flags = posture_check(card["strategy"], card,
+                                      card_legs[card["strategy"]])
+        card["posture_flags"] = posture_flags
+        for flag in posture_flags:
+            card.setdefault("blocks", []).append(f"POSTURE: {flag}")
         card["framework_alignment"] = round(100 * card["score"] /
                                              max(sum(scores.values()), 1), 0)
 
@@ -227,6 +293,12 @@ def build_x4(ctx: Context, *, setup: str = "auto", iv_state: str = "auto",
         wait_reasons.append("forward VRP is materially negative")
     if not ctx.data.get("fresh", True):
         wait_reasons.append("market data is stale")
+    if dte_fell_back:
+        wait_reasons.append(
+            f"no listed expiry in the {PREFERRED_DTE[0]}-{PREFERRED_DTE[1]} DTE "
+            f"window; built at {slc.dte} DTE, which is not the published tenor")
+    if any(c.get("posture_flags") for c in cards):
+        wait_reasons.append("a structural posture check failed")
     action = ("WAIT — model only: " + "; ".join(wait_reasons)
               if wait_reasons else f"MODEL {cards[0]['strategy'].upper()} — manual validation required")
     return {
@@ -248,6 +320,7 @@ def build_x4(ctx: Context, *, setup: str = "auto", iv_state: str = "auto",
             "gamma": ctx.regime.get("gamma"), "term": term.get("verdict"),
             "rr25": term.get("rr25_30d"), "skew_rich": term.get("skew_rich"),
             "expiry": slc.expiry.isoformat(), "dte": slc.dte,
+            "dte_window": list(PREFERRED_DTE), "dte_fell_back": dte_fell_back,
             "atm_iv_expiry": round(slc.atm_iv * 100, 2),
             "expected_move": round(em, 2),
         },

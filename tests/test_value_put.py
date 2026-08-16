@@ -48,6 +48,7 @@ def test_defined_risk_mode_uses_max_loss_and_protective_put():
 
 def test_value_scan_rejects_invalid_mode_and_dte():
     import pytest
+
     from value_put.service import scan_value_puts
 
     with pytest.raises(ValueError):

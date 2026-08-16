@@ -1,15 +1,16 @@
 """Evidence harness: run pre-fix and post-fix; prints one table."""
-import math, sys
+import math
+import sys
 from datetime import date, timedelta
+
 sys.path.insert(0, ".")
 
-from core import regime as R
-from core.pricing import bs_price, bs_greeks
-from core.models import Leg, Slice
-from core.pricing import struct_metrics
-from core.chain import k25
-from core.surface import term_stats
 import sentinel as S
+from core import regime as R
+from core.chain import k25
+from core.models import Leg, Slice
+from core.pricing import bs_greeks, bs_price, struct_metrics
+from core.surface import term_stats
 
 TODAY = date(2026, 6, 15)
 rows = []
@@ -63,7 +64,7 @@ t = term_stats(slices)
 # constant-maturity 9d/30d by variance interp (reference):
 def cm(dte):
     ss = sorted(slices, key=lambda s: s.dte)
-    for a, b in zip(ss, ss[1:]):
+    for a, b in zip(ss, ss[1:], strict=False):
         if a.dte <= dte <= b.dte:
             va, vb = a.atm_iv**2*a.dte, b.atm_iv**2*b.dte
             return math.sqrt((va + (vb-va)*(dte-a.dte)/(b.dte-a.dte))/dte)
@@ -104,6 +105,7 @@ rows.append(("E4 sentinel label at rr25=+4.5 (truth: put-skew)", lab))
 # ---- E14: ranker verdict/order when VRP<0 and term FLAT ----------------------
 from core.models import Context
 from selection.ranker import family_priority
+
 ctx = Context(symbol="SPX", spot=6000.0, today=TODAY, slices=slices, strikes=[6000.0],
               regime={**reg, "vrp": -1.0, "term": {"verdict": "FLAT"}, "rv21": 13.0},
               events={"fomc_dte": 999, "fomc_in_front": False, "opex_week": False,

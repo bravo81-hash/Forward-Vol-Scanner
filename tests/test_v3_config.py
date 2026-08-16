@@ -5,7 +5,7 @@ def test_hypothesis_registry_valid_and_unique():
     cfg = hypothesis_config()
     ids = [h["id"] for h in cfg["hypotheses"]]
     assert len(ids) == len(set(ids)) >= 13
-    assert set(h["status"] for h in cfg["hypotheses"]) <= set(cfg["statuses"])
+    assert {h["status"] for h in cfg["hypotheses"]} <= set(cfg["statuses"])
 
 
 def test_known_hypothesis_lookup():

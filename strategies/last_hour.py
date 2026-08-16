@@ -10,6 +10,7 @@ import math
 from statistics import NormalDist
 
 from core.pricing import RISK_FREE, struct_greeks, struct_metrics
+
 from .base import Strategy
 
 
@@ -24,8 +25,18 @@ def _put_strike(ctx, slc, abs_delta: float) -> float:
     return ctx.snap(k)
 
 
-def _slice(ctx, lo: int, hi: int, target: int):
-    return Strategy.expiry_in(ctx, lo, hi, target)
+# Listed expiries are Friday-anchored, so these narrow desk windows are empty
+# on many calendar alignments. Allow a small symmetric fallback rather than
+# dropping the structure from the desk without explanation.
+EXPIRY_TOL = 3
+
+
+def _slice(ctx, lo: int, hi: int, target: int, tol: int = EXPIRY_TOL):
+    return Strategy.expiry_in(ctx, lo, hi, target, tol=tol)
+
+
+def _slice_flagged(ctx, lo: int, hi: int, target: int, tol: int = EXPIRY_TOL):
+    return Strategy.expiry_in_flagged(ctx, lo, hi, target, tol=tol)
 
 
 class BullishCreditPutBWB(Strategy):
@@ -115,12 +126,13 @@ class BearishProtectedPutBWB(Strategy):
 
 class TimeEdgePutCalendar(Strategy):
     key, name = "timeedge", "TimeEdge SPX put calendar"
+    multi_expiry = True
     evidence_status, policy_id = "ACTIVE", "last-hour-v1"
 
     def propose(self, ctx):
         if ctx.symbol != "SPX":
             return []
-        front = _slice(ctx, 14, 18, 15)
+        front, front_widened = _slice_flagged(ctx, 14, 18, 15)
         if not front:
             return []
         backs = [s for s in ctx.slices if 21 <= s.dte <= 28 and s.dte - front.dte >= 7]
@@ -138,17 +150,22 @@ class TimeEdgePutCalendar(Strategy):
             f"Exact-strike IV: front {fiv:.2f}v, back {biv:.2f}v, back-front {biv-fiv:+.2f}v.",
             "Standard TimeEdge only: no automatic second tent; one predefined recenter maximum.",
         ]
+        if front_widened:
+            s.rationale.append(
+                f"EXPIRY: no listed 14-18 DTE Friday this week; using {front.dte} DTE.")
+        s.evidence.update(front_expiry_widened=front_widened)
         return [s]
 
 
 class TimeZoneHybrid(Strategy):
     key, name = "timezone", "TimeZone RUT PCS + put calendar"
+    multi_expiry = True
     evidence_status, policy_id = "PAPER", "last-hour-v1"
 
     def propose(self, ctx):
         if ctx.symbol != "RUT":
             return []
-        front = _slice(ctx, 14, 18, 15)
+        front, front_widened = _slice_flagged(ctx, 14, 18, 15)
         if not front:
             return []
         backs = [s for s in ctx.slices if 40 <= s.dte <= 47 and s.dte - front.dte >= 21]
@@ -181,7 +198,11 @@ class TimeZoneHybrid(Strategy):
             f"OTM put calendar: sell {front.dte} DTE / buy {back.dte} DTE at {cal_strike:g}; combined delta is near flat.",
             "One defense only: reduce the threatened PCS first; the next breach exits the whole position.",
         ]
-        s.evidence.update(pcs_credit=round(pcs_credit, 2), calendar_strike=cal_strike)
+        if front_widened:
+            s.rationale.append(
+                f"EXPIRY: no listed 14-18 DTE Friday this week; using {front.dte} DTE.")
+        s.evidence.update(pcs_credit=round(pcs_credit, 2), calendar_strike=cal_strike,
+                          front_expiry_widened=front_widened)
         return [s]
 
 

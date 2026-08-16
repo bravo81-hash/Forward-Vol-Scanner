@@ -29,9 +29,9 @@ no TWS, no ib_insync).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Optional
 
 
 # ============================================================ axes / vocab ==
@@ -193,8 +193,8 @@ class RegimeView:
     rr25: float           # 25d RR, vol pts (FVS: put25 − call25; POSITIVE = put skew)
 
     @classmethod
-    def from_fvs(cls, regime: dict, term: Optional[dict] = None,
-                 rr25: Optional[float] = None) -> "RegimeView":
+    def from_fvs(cls, regime: dict, term: dict | None = None,
+                 rr25: float | None = None) -> RegimeView:
         """Adapt FVS compute_regime() + term_stats() (+ optional rr25) -> axes.
 
         Direction comes straight from the FVS trend (which already encodes ADX:
@@ -249,7 +249,7 @@ class RegimeView:
 BUDGET_PER_100K = {"vega": 1200.0, "delta": 5.0, "theta_min": 0.0}
 
 
-def budget_for(nlv: Optional[float]) -> dict:
+def budget_for(nlv: float | None) -> dict:
     unit = max((nlv or 100_000.0) / 100_000.0, 0.25)
     return {"vega": BUDGET_PER_100K["vega"] * unit,
             "delta": BUDGET_PER_100K["delta"] * unit,
@@ -266,13 +266,13 @@ class BookView:
     gamma: float
     theta: float
     vega: float
-    min_short_dte: Optional[int] = None
+    min_short_dte: int | None = None
     gamma_flag: bool = False
     smsf_eu_cash_block: bool = False   # cannot do multi-expiry combos on EU cash index
 
     @classmethod
     def from_fvs(cls, account_meta: dict, book: dict, *, label: str = "",
-                 pool: str = "trading", smsf_eu_cash_block: bool = False) -> "BookView":
+                 pool: str = "trading", smsf_eu_cash_block: bool = False) -> BookView:
         """Adapt FVS portfolio.book.book_greeks() output for one account/symbol."""
         g = book.get("greeks", {})
         return cls(account=account_meta.get("account", "?"),
@@ -422,7 +422,7 @@ def advise(reg: RegimeView, books: Iterable[BookView], *, top_n: int = 3) -> lis
     for b in books:
         bud = budget_for(b.nlv)
         conflicts = detect_conflicts(reg, b, bud)
-        need_acc = {g: 0 for g in GREEKS}
+        need_acc = dict.fromkeys(GREEKS, 0)
         for c in conflicts:
             for g, want in c.need.items():
                 need_acc[g] += want
@@ -484,6 +484,53 @@ def print_reference() -> str:
     return "\n".join(L)
 
 
+# ====================================================== account profile ====
+@dataclass(frozen=True)
+class AccountProfileView:
+    """The account facts Sentinel actually needs.
+
+    Sentinel used to duck-type Keystone's `AccountProfile` directly, which
+    made a sibling checkout a hard dependency of this module and meant a
+    rename over there broke this file silently. This is the contract
+    instead: any object or mapping that can produce these four fields works,
+    whether it comes from Keystone, FVS `config/accounts.yaml`, or a test.
+    """
+    account_id: str
+    label: str
+    pool: str            # "trading" | "investing"
+    nlv: float
+
+    @classmethod
+    def coerce(cls, profile) -> AccountProfileView:
+        """Accept a mapping or any object exposing the same names."""
+        def field(*names, default=None):
+            for name in names:
+                if isinstance(profile, dict):
+                    if name in profile:
+                        return profile[name]
+                elif hasattr(profile, name):
+                    return getattr(profile, name)
+            return default
+
+        pool = field("pool", default="trading")
+        pool = getattr(pool, "value", str(pool))
+        account_id = str(field("account_id", "account", default="?"))
+        return cls(account_id=account_id,
+                   label=str(field("label", default=account_id)),
+                   pool=pool,
+                   nlv=float(field("nlv", default=0.0) or 0.0))
+
+
+def account_profiles_from_config() -> list[AccountProfileView]:
+    """Build profiles from FVS `config/accounts.yaml`, so Sentinel can run
+    connected without Keystone present at all."""
+    from config.loader import account_config
+    out = []
+    for account_id, row in (account_config().get("accounts") or {}).items():
+        out.append(AccountProfileView.coerce({**row, "account_id": account_id}))
+    return out
+
+
 # ============================================================ live adapter ==
 def from_live(ib, symbol: str, profiles: list, *,
               build_ctx_fn, term_stats_fn, book_greeks_fn, fetch_positions_fn) -> list[AccountGuidance]:
@@ -495,21 +542,23 @@ def from_live(ib, symbol: str, profiles: list, *,
         from portfolio.book import fetch_positions  as fetch_positions_fn
 
     FVS `Context` already carries `.regime` (compute_regime output) and `.slices`,
-    so Sentinel just adapts them. `profiles` are Keystone AccountProfile-likes
-    (account_id, label, pool, nlv). One regime read per symbol; per-account book
-    + advice. Import-free here so this module loads with no TWS / ib_insync.
+    so Sentinel just adapts them. `profiles` is any sequence satisfying
+    `AccountProfileView` (Keystone AccountProfile, an FVS accounts.yaml row,
+    or a plain dict). One regime read per symbol; per-account book + advice.
+    Import-free here so this module loads with no TWS / ib_insync.
     """
     ctx = build_ctx_fn(ib, symbol)
     term = term_stats_fn(ctx.slices)
     reg = RegimeView.from_fvs({**ctx.regime, "symbol": symbol}, term)
     books = []
-    for p in profiles:
+    for raw in profiles:
+        p = AccountProfileView.coerce(raw)
         positions = fetch_positions_fn(ib, symbol, account=p.account_id)
         bg = book_greeks_fn(ctx, positions)
-        pool = getattr(p.pool, "value", str(p.pool))
-        smsf_block = (symbol.upper() in EU_CASH_INDEX and pool == "investing")
+        smsf_block = (symbol.upper() in EU_CASH_INDEX and p.pool == "investing")
         books.append(BookView.from_fvs({"account": p.account_id, "nlv": p.nlv}, bg,
-                                       label=p.label, pool=pool, smsf_eu_cash_block=smsf_block))
+                                       label=p.label, pool=p.pool,
+                                       smsf_eu_cash_block=smsf_block))
     return advise(reg, books)
 
 

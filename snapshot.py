@@ -15,7 +15,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -114,9 +113,13 @@ def build_report(symbols: list[str], mode: str, account_filter: str | None) -> s
             out = shortlist(ctx)
             if mode == "live" and out["cards"]:
                 try:
-                    def enrich(ib):
-                        reprice_cards(ib, symbol, ctx.spot, ctx.today, out["cards"])
-                        return scan_walls(ib, symbol, ctx, out["cards"])
+                    # Bind the loop variables explicitly. The closure happens
+                    # to be invoked inside the same iteration today, so this is
+                    # latent rather than live — but it is exactly the bug that
+                    # bites the moment anyone defers the call.
+                    def enrich(ib, symbol=symbol, ctx=ctx, cards=out["cards"]):
+                        reprice_cards(ib, symbol, ctx.spot, ctx.today, cards)
+                        return scan_walls(ib, symbol, ctx, cards)
                     out["walls"] = with_ib(enrich)
                 except Exception as e:                     # noqa: BLE001
                     out["enrich_error"] = str(e)

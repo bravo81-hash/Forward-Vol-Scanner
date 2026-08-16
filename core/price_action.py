@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.request import Request, urlopen
 
 DEFAULT_FEED_URL = (
@@ -22,8 +22,8 @@ MAX_AGE_HOURS = 96
 def _timestamp(value: object) -> datetime:
     parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def validate_feed(payload: object, *, now: datetime | None = None) -> dict:
@@ -38,7 +38,7 @@ def validate_feed(payload: object, *, now: datetime | None = None) -> dict:
     if not isinstance(rows, list):
         raise ValueError("Price-Action feed rows are missing")
     generated = _timestamp(payload.get("generated"))
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    current = (now or datetime.now(UTC)).astimezone(UTC)
     age_hours = (current - generated).total_seconds() / 3600
     if age_hours < -1:
         raise ValueError("Price-Action feed timestamp is in the future")
@@ -94,7 +94,7 @@ def practice_feed(ideas: list[dict], *, now: datetime | None = None) -> tuple[di
                                        "S3": "PREFERRED", "S4": "EXPERIMENTAL"}[signal],
                      "evidence_reason": "practice-only integration context",
                      "regime": "practice", "align": "practice"})
-    generated = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    generated = (now or datetime.now(UTC)).astimezone(UTC)
     payload = {"schema_version": 1, "source": "Price-Action practice",
                "market": "us", "authority": "context_only",
                "generated": generated.strftime("%Y-%m-%dT%H:%M:%SZ"),

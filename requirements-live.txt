@@ -1,1 +1,4 @@
 -r requirements.txt
+# Production WSGI server. webapp.serve() uses it when present and falls back
+# to the Flask development server with a warning when it is not.
+waitress==3.0.2

@@ -8,8 +8,8 @@ relative strength, volume, market and sector) is applied by pattern_scanner.py.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
-from typing import Callable, Iterable
 
 import numpy as np
 import pandas as pd
@@ -643,7 +643,7 @@ def _double(ticker, d, atr, bullish=True):
         return None
     off, best = len(d) - len(x), None
     recent = swings[-7:]
-    for s1, s2 in zip(recent, recent[1:]):
+    for s1, s2 in zip(recent, recent[1:], strict=False):
         sep = s2[0] - s1[0]
         if not 10 <= sep <= 90:
             continue
@@ -779,7 +779,7 @@ def ascending_triangle(ticker, d, atr):
                 continue
             # One trough between each ceiling test and one after the last.
             lows = []
-            for left, right in zip(tests, tests[1:]):
+            for left, right in zip(tests, tests[1:], strict=False):
                 interval = _between(pl, left[0], right[0])
                 if not interval:
                     lows = []

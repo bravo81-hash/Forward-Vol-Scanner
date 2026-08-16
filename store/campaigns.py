@@ -76,6 +76,13 @@ class CampaignStore:
             CREATE INDEX IF NOT EXISTS ix_campaign_state ON campaigns(state, updated_at);
             CREATE INDEX IF NOT EXISTS ix_event_campaign ON campaign_events(campaign_id, ts);
             CREATE INDEX IF NOT EXISTS ix_order_campaign ON orders(campaign_id, updated_at);
+            -- The evidence report joins manual_tests and fills on their parent
+            -- key; without these both were full scans on every call.
+            CREATE INDEX IF NOT EXISTS ix_manual_campaign ON manual_tests(campaign_id, ts);
+            CREATE INDEX IF NOT EXISTS ix_fill_order ON fills(order_id, ts);
+            CREATE INDEX IF NOT EXISTS ix_campaign_strategy ON campaigns(strategy);
+            CREATE INDEX IF NOT EXISTS ix_snapshot_symbol ON snapshots(symbol, ts);
+            CREATE INDEX IF NOT EXISTS ix_candidate_expiry ON candidates(expires_at);
             """)
 
     def save_candidate(self, symbol: str, account: str | None, mode: str,
@@ -228,6 +235,30 @@ class CampaignStore:
                                 MIN(t.max_drawdown_pct) worst_drawdown_pct
                                 FROM campaigns c LEFT JOIN manual_tests t ON t.campaign_id=c.id
                                 GROUP BY c.strategy ORDER BY c.strategy""").fetchall()
+        return [dict(r) for r in rows]
+
+    def manual_test_rows(self, limit: int = 20000) -> list[dict]:
+        """Flat manual-test rows for the evidence report, aggregated in SQL.
+
+        `evidence_report` used to pull every campaign through `campaigns()` —
+        an N+1 of three queries per campaign plus a full JSON decode of each
+        card — only to read four fields off it. This is one indexed join.
+        """
+        sql = """
+            SELECT json_extract(c.card_json, '$.test_session_id') AS session_id,
+                   c.test_mode                                    AS test_mode,
+                   c.strategy                                     AS strategy,
+                   json_extract(c.card_json, '$.market_state')    AS market_state,
+                   json_extract(c.card_json, '$.rank')            AS rank,
+                   t.result_pct                                   AS result_pct,
+                   t.max_drawdown_pct                             AS max_drawdown_pct,
+                   t.setup_rating                                 AS setup_rating
+            FROM manual_tests t
+            JOIN campaigns c ON c.id = t.campaign_id
+            ORDER BY t.ts
+            LIMIT ?"""
+        with self.connect() as c:
+            rows = c.execute(sql, (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     def snapshots(self, symbol: str | None = None, limit: int = 500) -> list[dict]:

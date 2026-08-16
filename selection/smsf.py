@@ -26,11 +26,15 @@ Context are surfaced as notes, not suppression.
 """
 from __future__ import annotations
 
+from config.loader import doctrine
 from core.models import Context
 from selection.direction import vol_band
 
 # rr25 below this (put IV *under* call IV) = call side is the bid
-CALL_SKEW_BID = -0.5    # vol pts
+CALL_SKEW_BID = doctrine("smsf", "call_skew_bid", -0.5)          # vol pts
+# Dead band around the threshold: without it the variant ordering flapped on
+# every rr25 oscillation across a single hard cut.
+CALL_SKEW_DEADBAND = doctrine("smsf", "call_skew_deadband", 0.25)
 
 # ------------------------------------------------------------- build specs --
 # Single source of truth for the reference guide (UI + static playbook).
@@ -163,9 +167,19 @@ def gate_s(ctx: Context, bias: int) -> tuple[list[tuple[str, str]], list[str]]:
     band, band_src = vol_band(reg)
     rr25 = term.get("rr25_30d", 0.0)
     skew_rich = bool(term.get("skew_rich"))
-    call_bid = rr25 <= CALL_SKEW_BID
+    # Decisive-crossing rule rather than a bare threshold: the call side has
+    # to clear the dead band before it takes over the ranking, so rr25
+    # oscillating around a single hard cut no longer reorders the variants.
+    call_bid = rr25 <= CALL_SKEW_BID - CALL_SKEW_DEADBAND
+    call_bid_marginal = (not call_bid
+                         and rr25 <= CALL_SKEW_BID + CALL_SKEW_DEADBAND)
     tverd = term.get("verdict", "FLAT")
     notes: list[str] = []
+    if call_bid_marginal:
+        notes.append(
+            f"SKEW MARGINAL — rr25 {rr25:+.2f}v sits within ±{CALL_SKEW_DEADBAND:.2f}v "
+            f"of the call-bid threshold ({CALL_SKEW_BID:+.2f}v); holding the "
+            f"put-side default until the call side clears the band")
 
     hi, lo = band in ("ELV", "STR"), band == "CMP"
 
@@ -249,8 +263,8 @@ def gate_s(ctx: Context, bias: int) -> tuple[list[tuple[str, str]], list[str]]:
             ]
         elif bias < 0:
             order = [
-                ("otm_put_fly", f"Mid IV, steep skew, bearish bias — body at "
-                                f"−1σ profits from drift into the tent"),
+                ("otm_put_fly", "Mid IV, steep skew, bearish bias — body at "
+                                "−1σ profits from drift into the tent"),
                 ("put_bwb", "Same engine, body nearer the money if the "
                             "bearish view is mild"),
                 ("target_fly", "Put fly AT the downside target if you have "
@@ -294,10 +308,18 @@ def gate_s(ctx: Context, bias: int) -> tuple[list[tuple[str, str]], list[str]]:
 
 
 # ---------------------------------------------------------------- verdict --
-def smsf_verdict(ctx: Context, intent: str = "auto") -> dict:
+def smsf_verdict(ctx: Context, intent: str = "auto",
+                 cash: float | None = None, nlv: float | None = None) -> dict:
     """Full payload for the SMSF tab, led by ONE action line.
 
     intent: 'auto' (regime bias decides) | 'bull' | 'neutral' | 'bear'
+    cash:   available funds in the cash account, when known. Gate S reasons
+            about cash structurally — every adjustment is debit-side so it
+            consumes only its debit — but without this it could not say
+            whether the account can actually fund the structure it is
+            recommending. Supplied, it produces an explicit affordability
+            line; absent, the payload says so rather than implying a check
+            that never happened.
     """
     reg = ctx.regime
     term = reg.get("term", {})
@@ -335,6 +357,21 @@ def smsf_verdict(ctx: Context, intent: str = "auto") -> dict:
             action = ("ACTION: STAND ASIDE — INVERTED FRONT, ZERO NEW CARRY"
                       if bias == 0 else action + " — DEBIT ONLY; ZERO NEW CARRY")
 
+    cash_block = {"available_funds": (round(float(cash), 2) if cash is not None
+                                      else None),
+                  "nlv": (round(float(nlv), 2) if nlv is not None else None),
+                  "checked": cash is not None}
+    if cash is None:
+        notes.append("CASH UNKNOWN — no available-funds figure supplied, so "
+                     "nothing here has been checked against what the account "
+                     "can actually fund. Confirm buying power before entry")
+    else:
+        cash_block["headroom_pct_nlv"] = (round(100 * float(cash) / float(nlv), 1)
+                                          if nlv else None)
+        notes.append(f"Available funds ${float(cash):,.0f} — every structure "
+                     f"below holds cash for its full width; confirm the exact "
+                     f"requirement against this before entry")
+
     notes.append("Cash-account doctrine: single expiry only; adjust with "
                  "debit-side adds (long option / debit spread / extra wing) — "
                  "credit-spread adds consume cash equal to their width")
@@ -357,6 +394,7 @@ def smsf_verdict(ctx: Context, intent: str = "auto") -> dict:
             "trend": reg.get("trend"),
         },
         "structures": structures, "notes": notes, "data": ctx.data,
+        "cash": cash_block,
     }
 
 
@@ -365,7 +403,7 @@ _REGISTRY_KEY = {"put_bwb": "bwb"}
 
 
 def smsf_shortlist(ctx: Context, intent: str = "auto", account: str | None = None,
-                   nlv: float | None = None) -> dict:
+                   nlv: float | None = None, cash: float | None = None) -> dict:
     """Turn Gate S rankings into exact, risk-evaluated candidates.
 
     Hypothesis candidates are stage-blocked for live TWS but remain fully
@@ -376,8 +414,11 @@ def smsf_shortlist(ctx: Context, intent: str = "auto", account: str | None = Non
     from selection.manage import management_plan
     from strategies import REGISTRY
 
-    base = smsf_verdict(ctx, intent)
     profile = account_profile(account, nlv)
+    available = (float(cash) if cash is not None
+                 else (float(profile["available_funds"])
+                       if profile.get("available_funds") is not None else None))
+    base = smsf_verdict(ctx, intent, cash=available, nlv=profile["nlv"])
     cards = []
     for row in base["structures"]:
         key = _REGISTRY_KEY.get(row["key"], row["key"])
@@ -407,6 +448,27 @@ def smsf_shortlist(ctx: Context, intent: str = "auto", account: str | None = Non
                                           ev.get("status") in ("PAPER", "ACTIVE"))
             if not card["tws_stage_allowed"]:
                 card["blocks"].append("Hypothesis strategy: test in OptionNet/paper before TWS staging")
+            # A cash account can only hold what it can fund; the governor's
+            # cash check is a percentage of NLV, which is not the same thing.
+            lots = max(int(gov["approved_lots"]), 0)
+            need = float(card.get("cash_required") or 0.0)
+            if available is not None and need > 0:
+                fundable = int(available // need) if need else lots
+                card["cash_check"] = {"available_funds": round(available, 2),
+                                      "cash_per_lot": round(need, 2),
+                                      "fundable_lots": fundable}
+                if fundable < 1:
+                    card["blocks"].append(
+                        f"CASH: one lot holds ${need:,.0f}; the account has "
+                        f"${available:,.0f} available")
+                elif fundable < lots:
+                    card["blocks"].append(
+                        f"CASH: available funds cover {fundable} lot(s), not the "
+                        f"{lots} the risk budget approves")
+            else:
+                card["cash_check"] = {"available_funds": None,
+                                      "cash_per_lot": round(need, 2),
+                                      "fundable_lots": None}
             cards.append(card)
     cards.sort(key=lambda c: c["score"], reverse=True)
     base.update(cards=cards, account=profile, mode=ctx.mode, spot=ctx.spot,

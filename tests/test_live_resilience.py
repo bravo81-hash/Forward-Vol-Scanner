@@ -5,8 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from core.events import trading_clock
-from core.ib_client import (TWS_REQUEST_TIMEOUT, _connection_error,
-                            _finish_result, with_ib)
+from core.ib_client import TWS_REQUEST_TIMEOUT, _connection_error, _finish_result, with_ib
 
 
 def test_ny_melbourne_clock_handles_both_dst_seasons():

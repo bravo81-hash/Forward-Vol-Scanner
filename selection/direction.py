@@ -24,11 +24,20 @@ through the play verdict, not by suppressing the ranking.
 """
 from __future__ import annotations
 
+from config.loader import doctrine, doctrine_reviewed
 from core.models import Context
 from core.surface import event_premium
 
-SELL_VRP = 3.0     # vol pts of forward VRP that make selling vol the play
-BUY_VRP = -2.0     # vol pts of negative forward VRP that make buying vol the play
+# Doctrine thresholds live in config/doctrine.yaml; the literals here are the
+# fallbacks and remain the documented defaults.
+SELL_VRP = doctrine("direction", "sell_vrp", 3.0)      # vol pts: selling vol is the play
+BUY_VRP = doctrine("direction", "buy_vrp", -2.0)       # vol pts: buying vol is the play
+PROXY_ELV = doctrine("direction", "proxy_elevated_ratio", 1.20)
+PROXY_CMP = doctrine("direction", "proxy_compressed_ratio", 0.90)
+MARGIN_VRP = doctrine("direction", "margin_vrp", 0.75)
+MARGIN_RATIO = doctrine("direction", "margin_ratio", 0.05)
+MARGIN_IV_PCTL = doctrine("direction", "margin_iv_pctl", 5.0)
+MARGIN_RR25_PCT = doctrine("direction", "margin_rr25_pct", 0.03)
 
 # structure keys -> display labels, per side
 LABELS = {
@@ -61,7 +70,8 @@ def vol_band(reg: dict) -> tuple[str, str]:
         har = reg.get("har_rv") or 0.0
         iv30 = reg.get("iv30") or 0.0
         ratio = iv30 / har if har else 1.0
-        band = "ELV" if ratio >= 1.20 else "CMP" if ratio <= 0.90 else "NRM"
+        band = ("ELV" if ratio >= PROXY_ELV else
+                "CMP" if ratio <= PROXY_CMP else "NRM")
         return band, f"proxy: IV30/HAR = {ratio:.2f} (no IV history)"
     return reg.get("vol_state", "NRM"), f"IV rank {reg.get('iv_pctl', 50.0):.0f}%ile"
 
@@ -244,6 +254,80 @@ def gate2(ctx: Context, side: str) -> list[dict]:
     return _rank(side, order)
 
 
+# ------------------------------------------------------------- confidence ---
+def matrix_confidence(ctx: Context) -> dict:
+    """How decisively the inputs select the branch that produced the ranking.
+
+    Gate 2 is a rules matrix, so there is no score margin between rank 1 and
+    rank 2 to report. What can be reported is how close each input sits to
+    the boundary that chose the branch: a ranking driven by rr25 = -0.02v
+    against a "skew rich" cut is a coin flip dressed as a verdict, and the
+    user should see that before sizing off it.
+
+    Returns the overall level plus the specific inputs that would flip the
+    ranking, with the move required.
+    """
+    reg = ctx.regime
+    term = reg.get("term", {})
+    marginal: list[dict] = []
+
+    vrp_fwd = float(reg.get("vrp_fwd") or 0.0)
+    for name, cut in (("sell-vol cut", SELL_VRP), ("buy-vol cut", BUY_VRP)):
+        distance = abs(vrp_fwd - cut)
+        if distance <= MARGIN_VRP:
+            marginal.append({
+                "input": "vrp_fwd", "value": round(vrp_fwd, 2),
+                "boundary": round(float(cut), 2), "distance": round(distance, 2),
+                "unit": "vol pts",
+                "effect": f"Gate 1 play type flips at the {name}"})
+
+    band, _ = vol_band(reg)
+    if reg.get("ivp_proxy"):
+        har, iv30 = float(reg.get("har_rv") or 0.0), float(reg.get("iv30") or 0.0)
+        ratio = iv30 / har if har else 1.0
+        for cut in (PROXY_ELV, PROXY_CMP):
+            distance = abs(ratio - cut)
+            if distance <= MARGIN_RATIO:
+                marginal.append({
+                    "input": "iv30/har ratio", "value": round(ratio, 3),
+                    "boundary": round(float(cut), 3), "distance": round(distance, 3),
+                    "unit": "ratio",
+                    "effect": "IV band changes, which selects a different matrix row"})
+    else:
+        pctl = float(reg.get("iv_pctl") or 50.0)
+        for cut in (25.0, 60.0, 85.0):
+            distance = abs(pctl - cut)
+            if distance <= MARGIN_IV_PCTL:
+                marginal.append({
+                    "input": "iv_pctl", "value": round(pctl, 1),
+                    "boundary": cut, "distance": round(distance, 1),
+                    "unit": "%ile",
+                    "effect": "IV band changes, which selects a different matrix row"})
+
+    # skew_rich is rr25 > 30% of ATM IV; report the rr25 move that flips it.
+    iv30 = float(reg.get("iv30") or 0.0)
+    rr25 = float(term.get("rr25_30d") or 0.0)
+    if iv30 > 0:
+        cut = 0.30 * iv30
+        distance = abs(rr25 - cut)
+        if distance <= MARGIN_RR25_PCT * iv30:
+            marginal.append({
+                "input": "rr25_30d", "value": round(rr25, 2),
+                "boundary": round(cut, 2), "distance": round(distance, 2),
+                "unit": "vol pts",
+                "effect": "skew_rich flips, which reorders the ranking"})
+
+    level = "MARGINAL" if marginal else "DECISIVE"
+    summary = ("Inputs sit clear of every branch boundary."
+               if not marginal else
+               "Ranking is sensitive to: " +
+               "; ".join(f"{m['input']} {m['value']} is {m['distance']} "
+                         f"{m['unit']} from {m['boundary']}" for m in marginal))
+    return {"level": level, "band": band, "marginal_inputs": marginal,
+            "summary": summary,
+            "thresholds_reviewed": doctrine_reviewed("direction")}
+
+
 # ---------------------------------------------------------------- verdict ---
 def direction_verdict(ctx: Context, intent: str = "auto") -> dict:
     """Full payload for the Direction tab, led by ONE unambiguous action line.
@@ -309,6 +393,11 @@ def direction_verdict(ctx: Context, intent: str = "auto") -> dict:
             notes.append("Auto intent: regime bias 0 — pick a side yourself "
                          "(Long/Short) if you have a view the regime doesn't")
 
+    confidence = matrix_confidence(ctx)
+    if confidence["level"] == "MARGINAL":
+        notes.append("CONFIDENCE MARGINAL — " + confidence["summary"] +
+                     ". Treat the ranking as near-equivalent and size down.")
+
     for g in ctx.gates:
         if g.get("hard"):
             notes.append(f"HARD GATE {g.get('code', '?')}: {g.get('msg', '')}")
@@ -328,4 +417,5 @@ def direction_verdict(ctx: Context, intent: str = "auto") -> dict:
             "trend": reg.get("trend"),
         },
         "structures": structures, "notes": notes, "data": ctx.data,
+        "confidence": confidence,
     }

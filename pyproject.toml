@@ -1,0 +1,37 @@
+[tool.ruff]
+# Lint the whole repository. The CI job used to name individual paths, which
+# left core/, pattern_scanner/, value_put/, sentinel.py and stock_radar.py
+# byte-compiled but never linted — the symptom of a monolith nobody wanted to
+# touch. Per-file ignores carry the few deliberate exceptions instead.
+line-length = 110
+target-version = "py311"
+exclude = [".git", ".devcontainer", "static"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+  "E501",   # long lines are mostly doctrine prose in rationale strings
+  "B008",   # Flask/param defaults
+  "UP038",
+  # `for l in legs` is the house idiom across pricing, book and strategy code.
+  # Renaming it repo-wide is a large diff with no behavioural gain and a real
+  # chance of a typo in the middle of the pricing math, so it stays.
+  "E741",
+  # dict() over {} in the mock/company tables, where the keyword form is what
+  # makes those literal tables readable.
+  "C408",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Route modules re-export the shared seam for the handlers below them.
+"web/*.py" = ["F401", "F403", "F405", "E402"]
+"webapp.py" = ["F401", "F403", "F405", "E402"]
+# Tests import inside functions on purpose, to control module import order.
+"tests/*.py" = ["E402", "F401", "B007"]
+# CLI tool: sys.path is set up before the repo imports, by necessity.
+"tools/*.py" = ["E402"]
+# One-off analysis script: terse by design, imports after an argv guard.
+"compare_accuracy.py" = ["E402", "E702"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

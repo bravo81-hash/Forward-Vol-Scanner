@@ -1,6 +1,7 @@
 """SQLite audit log: every shortlist served + every order staged.
 Feeds the future edge-audit (suggested vs chosen vs outcome)."""
 from __future__ import annotations
+
 import json
 import sqlite3
 import time
