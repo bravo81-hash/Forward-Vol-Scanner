@@ -14,7 +14,8 @@ and a machine for manufacturing conviction that has not been earned.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+import calendar
+from datetime import date, timedelta
 
 from core.fundamentals import Fundamentals, fundamental_gates
 
@@ -45,14 +46,18 @@ def _sma(xs: list[float], n: int) -> float | None:
     return sum(xs[-n:]) / n if len(xs) >= n else None
 
 
-def _atr(bars: list[dict], n: int) -> float | None:
+def _atr_pct(bars: list[dict], n: int) -> float | None:
     if len(bars) < n + 1:
         return None
     trs = []
     for prev, cur in zip(bars[-n - 1:-1], bars[-n:]):
-        trs.append(max(cur["high"] - cur["low"],
-                       abs(cur["high"] - prev["close"]),
-                       abs(cur["low"] - prev["close"])))
+        prev_close = prev["close"]
+        if not prev_close:
+            return None
+        tr = max(cur["high"] - cur["low"],
+                 abs(cur["high"] - prev_close),
+                 abs(cur["low"] - prev_close))
+        trs.append(tr / prev_close)
     return sum(trs) / n if trs else None
 
 
@@ -93,7 +98,7 @@ class BaseMetrics:
     dollar_volume: float = 0.0
     volume_dryup: float = 1.0
     higher_lows: int = 0
-    rs_slope: float = 0.0
+    rs_slope: float | None = None
     sma50: float | None = None
     sma50_slope: float = 0.0
     ok: bool = False
@@ -127,7 +132,7 @@ def base_metrics(symbol: str, bars: list[dict],
             break
         m.sessions_since_new_low += 1
 
-    atr20, atr100 = _atr(bars, 20), _atr(bars, 100)
+    atr20, atr100 = _atr_pct(bars, 20), _atr_pct(bars, 100)
     m.atr_compression = (atr20 / atr100) if atr20 and atr100 else 1.0
 
     last8w = bars[-40:]
@@ -135,7 +140,9 @@ def base_metrics(symbol: str, bars: list[dict],
     m.base_width = (hi - lo) / m.price if m.price else 1.0
 
     vols = [b.get("volume", 0.0) for b in bars]
-    m.dollar_volume = (sum(vols[-90:]) / 90.0) * m.price if len(vols) >= 90 else 0.0
+    m.dollar_volume = (sum(b["close"] * b.get("volume", 0.0)
+                           for b in bars[-90:]) / 90.0
+                       if len(vols) >= 90 else 0.0)
     v20, v100 = sum(vols[-20:]) / 20.0, sum(vols[-100:]) / 100.0
     m.volume_dryup = (v20 / v100) if v100 else 1.0
 
@@ -146,11 +153,17 @@ def base_metrics(symbol: str, bars: list[dict],
     if m.sma50 and prev50:
         m.sma50_slope = (m.sma50 - prev50) / prev50
 
-    if bench_bars and len(bench_bars) >= 21:
-        bc = _closes(bench_bars)
-        rs_now = m.price / bc[-1]
-        rs_then = closes[-21] / bc[-21]
-        m.rs_slope = (rs_now - rs_then) / rs_then if rs_then else 0.0
+    if bench_bars:
+        stock_by_date = {str(b.get("date")): b["close"] for b in bars
+                         if b.get("date") is not None}
+        bench_by_date = {str(b.get("date")): b["close"] for b in bench_bars
+                         if b.get("date") is not None}
+        common = sorted(set(stock_by_date) & set(bench_by_date))
+        if len(common) >= 21:
+            now, then = common[-1], common[-21]
+            rs_now = stock_by_date[now] / bench_by_date[now]
+            rs_then = stock_by_date[then] / bench_by_date[then]
+            m.rs_slope = ((rs_now - rs_then) / rs_then) if rs_then else None
 
     m.ok = True
     return m
@@ -230,7 +243,8 @@ def quality_score(m: BaseMetrics, f: Fundamentals,
                                                   pool.get("atr_compression", [])))
     trend = f.eps_trend_90d if f.eps_trend_90d is not None else 0.0
     parts["estimate_revisions"] = 25.0 * max(0.0, min(1.0, 0.5 + trend * 5))
-    parts["rs_inflection"] = 20.0 * max(0.0, min(1.0, 0.5 + m.rs_slope * 10))
+    parts["rs_inflection"] = (0.0 if m.rs_slope is None else
+                              20.0 * max(0.0, min(1.0, 0.5 + m.rs_slope * 10)))
     parts["volume_dryup"] = 15.0 * max(0.0, min(1.0, 1.0 - m.volume_dryup))
     parts["base_structure"] = 15.0 * min(1.0, m.higher_lows / 3.0)
 
@@ -247,9 +261,9 @@ def scan(candidates: dict[str, list[dict]], fundamentals: dict[str, Fundamentals
     Returns fewer than `limit` when fewer qualify. A screener that always
     returns exactly five has stopped screening.
     """
+    limit = max(0, min(int(limit), OUTPUT_LIMIT))
     metrics = {s: base_metrics(s, bars, bench_bars)
                for s, bars in candidates.items()}
-    pool = {"atr_compression": [m.atr_compression for m in metrics.values() if m.ok]}
 
     survivors, rejected = [], []
     for symbol, m in metrics.items():
@@ -262,13 +276,15 @@ def scan(candidates: dict[str, list[dict]], fundamentals: dict[str, Fundamentals
                "unrated": f.status != "OK"}
 
         if struct_ok and fund_ok:
-            score, parts = quality_score(m, f, pool)
-            row.update(score=score, score_parts=parts)
             survivors.append(row)
         else:
             row["score"] = 0.0
             rejected.append(row)
 
+    pool = {"atr_compression": [r["metrics"].atr_compression for r in survivors]}
+    for row in survivors:
+        score, parts = quality_score(row["metrics"], row["fundamentals"], pool)
+        row.update(score=score, score_parts=parts)
     survivors.sort(key=lambda r: r["score"], reverse=True)
     return {"policy_id": POLICY_ID,
             "watchlist": survivors[:limit],
@@ -280,6 +296,64 @@ def scan(candidates: dict[str, list[dict]], fundamentals: dict[str, Fundamentals
 
 
 # --------------------------------------------------------------- trigger --
+def _observed(day: date) -> date:
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(weekday - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _easter(year: int) -> date:
+    """Gregorian Easter (Meeus/Jones/Butcher), used for Good Friday."""
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    f, g = (b + 8) // 25, (b - (b + 8) // 25 + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    return date(year, month, (h + l - 7 * m + 114) % 31 + 1)
+
+
+def _market_holidays(year: int) -> set[date]:
+    return {
+        _observed(date(year, 1, 1)),
+        _nth_weekday(year, 1, 0, 3),
+        _nth_weekday(year, 2, 0, 3),
+        _easter(year) - timedelta(days=2),
+        _last_weekday(year, 5, 0),
+        _observed(date(year, 6, 19)),
+        _observed(date(year, 7, 4)),
+        _nth_weekday(year, 9, 0, 1),
+        _nth_weekday(year, 11, 3, 4),
+        _observed(date(year, 12, 25)),
+    }
+
+
+def trading_sessions_until(today: date, event: date) -> int | None:
+    if event < today:
+        return None
+    holidays = _market_holidays(today.year) | _market_holidays(event.year)
+    sessions, day = 0, today
+    while day < event:
+        day += timedelta(days=1)
+        if day.weekday() < 5 and day not in holidays:
+            sessions += 1
+    return sessions
+
+
 def trigger(m: BaseMetrics, bars: list[dict],
             earnings: date | None = None,
             today: date | None = None) -> dict:
@@ -320,10 +394,16 @@ def trigger(m: BaseMetrics, bars: list[dict],
             f"Reclaim-day volume ran {mult:.1f}x the twenty-day average, below the "
             f"{MIN_TRIGGER_VOL_MULT}x requirement, so the move lacks participation.")
 
-    if earnings and 0 <= (earnings - today).days <= EARNINGS_BLACKOUT_SESSIONS:
+    sessions = trading_sessions_until(today, earnings) if earnings else None
+    if earnings is None:
         fired = False
         checks.append(
-            f"Earnings land in {(earnings - today).days} days, inside the "
+            "The next earnings date is unavailable, so the five-session blackout "
+            "cannot be verified and the trigger remains blocked.")
+    elif sessions is not None and sessions <= EARNINGS_BLACKOUT_SESSIONS:
+        fired = False
+        checks.append(
+            f"Earnings land in {sessions} trading sessions, inside the "
             f"{EARNINGS_BLACKOUT_SESSIONS}-session blackout, so entry is deferred "
             f"until the event has passed.")
 

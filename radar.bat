@@ -1,5 +1,4 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-start "" http://127.0.0.1:8765/stocks
-python webapp.py
+powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0launch_te_app.ps1" -Page stocks

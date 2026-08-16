@@ -5,8 +5,7 @@ set "PATH=%PYPATH%;%PYPATH%\Scripts;%PATH%"
 cd /d "%~dp0"
 
 if "%~1"=="" (
-    start "" http://127.0.0.1:8765
-    python webapp.py
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0launch_te_app.ps1" -Page equity
 ) else (
     python fwdvol_scanner.py %*
 )

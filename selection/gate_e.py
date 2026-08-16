@@ -48,16 +48,17 @@ def stage_from_bars(bars: list[dict]) -> tuple[str, int]:
     price = closes[-1]
 
     highs = [b["high"] for b in bars]
-    h52 = max(highs[-252:]) if len(highs) >= 252 else max(highs)
-    h26 = max(highs[-126:])
-    h13 = max(highs[-63:])
-    descending = h13 < h26 < h52
+    # These are disjoint windows. Nested maxima make h13 <= h26 <= h52 true
+    # almost by construction and incorrectly label an ordinary base Stage 4.
+    recent_high = max(highs[-63:])
+    middle_high = max(highs[-126:-63])
+    older_high = max(highs[-252:-126]) if len(highs) >= 252 else max(highs[-189:-126])
+    lower_highs = recent_high < middle_high < older_high
+    recent_return = price / closes[-63] - 1.0 if closes[-63] else 0.0
 
-    if price > sma150 and slope > 0.005 and not descending:
+    if price > sma150 and slope > 0.005 and not lower_highs:
         return "Stage 2 (advancing)", 1
-    if price < sma150 and (slope < -0.005 or descending):
-        return "Stage 4 (declining)", -1
-    if descending and price < h52 * 0.75:
+    if price < sma150 and slope < -0.005 and lower_highs and recent_return < -0.03:
         return "Stage 4 (declining)", -1
     return "Stage 1/3 (basing or topping)", 0
 
@@ -75,7 +76,7 @@ def _stage(reg: dict, bars: list[dict] | None = None) -> tuple[str, int]:
 
 
 def iv_rv(reg: dict) -> tuple[float | None, float | None, float | None]:
-    """IV30 and RV21 as PERCENT (core.regime stores them that way, e.g. 32.90)."""
+    """Comparison IV and RV21 as percent; `iv30` is the legacy regime key."""
     iv = reg.get("iv30")
     rv = reg.get("rv21")
     if not iv or not rv:
@@ -97,6 +98,9 @@ def select(ctx: Context, hold: str = "medium", *,
     stage_label, stage = _stage(reg, bars)
     if trend_state is not None:
         stage = trend_state
+        stage_label = ({1: "Stage 2 (advancing)",
+                        0: "Stage 1/3 (basing or topping)",
+                        -1: "Stage 4 (declining)"}.get(stage, "Stage unknown"))
 
     iv, rv, ratio = iv_rv(reg)
     iv_rank = reg.get("iv_pctl")      # already 0-100 from core.regime
@@ -109,6 +113,17 @@ def select(ctx: Context, hold: str = "medium", *,
 
     blocks: list[str] = []
     notes: list[str] = []
+
+    if ratio is None:
+        blocks.append(
+            "VOLATILITY DATA BLOCK: implied and realised volatility must both be "
+            "measured before Gate E can compare buying with selling premium, so "
+            "no structure is offered while either input is unavailable.")
+    elif (ctx.data or {}).get("volatility_inputs_verified") is False:
+        blocks.append(
+            "VOLATILITY DATA BLOCK: the option surface used an unverified or "
+            "historical fallback rather than contemporaneous cross-checked quotes, "
+            "so its IV/RV comparison cannot authorize a structure.")
 
     # ---------------------------------------------------------- trend gate
     if stage < 0:
@@ -201,16 +216,17 @@ def select(ctx: Context, hold: str = "medium", *,
     src = (ctx.data or {}).get("chain_source")
     if src == "IBKR TWS":
         notes.append(
-            "Quotes, implied volatility and the strike ladder all came from "
-            "TWS, so these are real NBBO prices rather than solved mids.")
+            "The surface inputs came from TWS, but a structure is treated as "
+            "model-priced unless every displayed leg carries its own verified "
+            "quote provenance.")
     elif src == "yfinance":
         why = (ctx.data or {}).get("live_unavailable")
         notes.append(
             "Chain data came from yfinance"
             + (" because TWS was unreachable (%s)" % why if why else "")
-            + ", so implied volatility on long-dated strikes is solved from "
-              "mid prices rather than quoted, and the numbers should be "
-              "verified in TWS before trading.")
+            + "; each leg states whether IV was cross-checked from a quoted value "
+              "or solved from bid/ask mid, while last-price fallbacks remain "
+              "explicit and cannot authorize a ZEBRA leg.")
 
     shortfall = (ctx.data or {}).get("tenor_shortfall")
     if shortfall:
@@ -271,6 +287,14 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
         strat = REGISTRY.get(key)
         if not strat:
             continue
+        if (key == "zebra"
+                and (ctx.data or {}).get("chain_source") == "IBKR TWS"
+                and not (ctx.data or {}).get("verified_zebra_quotes")):
+            out["notes"].append(
+                "ZEBRA was refused because TWS supplied no verified deep-in-the-money "
+                "quote for the solved strike/expiry contract; an option-chain "
+                "definition alone is not evidence that the leg is tradeable.")
+            continue
         try:
             for sug in strat.propose(ctx):
                 dtes = {(l.expiry - ctx.today).days for l in sug.legs}
@@ -280,7 +304,14 @@ def build(ctx: Context, hold: str = "medium", **kw) -> dict:
                         f"{sorted(dtes)} days, outside the {lo}-{hi} day window "
                         f"the {hold} hold requires.")
                     continue
-                suggestions += [sug.to_dict()]
+                item = sug.to_dict()
+                if key == "zebra" and item.get("max_profit") == float("inf"):
+                    item["max_profit"] = None
+                    item["max_profit_unbounded"] = True
+                item["price_provenance"] = ((item.get("evidence") or {})
+                                             .get("leg_price_provenance")
+                                             or ["model-derived from the context surface"])
+                suggestions.append(item)
         except Exception as exc:
             out["notes"].append(
                 f"Structure {key} could not be built for {ctx.symbol} "

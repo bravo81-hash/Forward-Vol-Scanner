@@ -52,12 +52,16 @@ def implied_vol(price: float, spot: float, strike: float, t: float, cp: str,
         return None
 
     lo, hi = IV_LO, IV_HI
-    if bs_price(spot, strike, t, hi, cp, q=q) < price:
+    lo_price = bs_price(spot, strike, t, lo, cp, q=q, r=r)
+    hi_price = bs_price(spot, strike, t, hi, cp, q=q, r=r)
+    if price < lo_price - TOL or price > hi_price + TOL:
         return None
+    if abs(price - lo_price) <= TOL:
+        return lo
 
     for _ in range(MAX_ITER):
         mid = 0.5 * (lo + hi)
-        val = bs_price(spot, strike, t, mid, cp, q=q)
+        val = bs_price(spot, strike, t, mid, cp, q=q, r=r)
         if abs(val - price) < TOL:
             return mid
         if val < price:
@@ -69,8 +73,8 @@ def implied_vol(price: float, spot: float, strike: float, t: float, cp: str,
     return 0.5 * (lo + hi)
 
 
-def row_mid(row) -> float | None:
-    """Mid from bid/ask, falling back to last traded price."""
+def row_price(row) -> tuple[float | None, str | None]:
+    """Return the usable price and its provenance."""
     def num(v):
         try:
             f = float(v)
@@ -80,8 +84,14 @@ def row_mid(row) -> float | None:
 
     bid, ask = num(row.get("bid")), num(row.get("ask"))
     if bid and ask and ask >= bid:
-        return 0.5 * (bid + ask)
-    return num(row.get("lastPrice"))
+        return 0.5 * (bid + ask), "bid/ask mid"
+    last = num(row.get("lastPrice"))
+    return (last, "lastPrice fallback") if last is not None else (None, None)
+
+
+def row_mid(row) -> float | None:
+    """Compatibility helper returning only the selected price."""
+    return row_price(row)[0]
 
 
 def repair_iv(frame, spot: float, t: float, cp: str, q: float = 0.0):
@@ -93,14 +103,38 @@ def repair_iv(frame, spot: float, t: float, cp: str, q: float = 0.0):
     if frame is None or getattr(frame, "empty", True):
         return frame
     out = frame.copy()
-    solved = []
+    solved, sources, cross_checked = [], [], []
     for _, row in out.iterrows():
         quoted = row.get("impliedVolatility")
-        if is_sane(quoted):
+        price, source = row_price(row)
+        bid = row.get("bid")
+        ask = row.get("ask")
+        try:
+            bid, ask = float(bid), float(ask)
+            valid_market = (bid == bid and ask == ask and bid > 0 and ask >= bid)
+        except (TypeError, ValueError):
+            valid_market = False
+
+        trusted = False
+        if is_sane(quoted) and valid_market:
+            model = bs_price(spot, float(row["strike"]), t, float(quoted), cp,
+                             q=q, r=RISK_FREE)
+            # Permit a small rounding cushion, but never trust a quoted IV whose
+            # model value lies outside the contemporaneous market.
+            cushion = max(0.01, 0.02 * (ask - bid))
+            trusted = bid - cushion <= model <= ask + cushion
+
+        if trusted:
             solved.append(float(quoted))
+            sources.append("quoted IV cross-checked to bid/ask")
+            cross_checked.append(True)
             continue
-        mid = row_mid(row)
-        iv = implied_vol(mid, spot, float(row["strike"]), t, cp, q=q)
+
+        iv = implied_vol(price, spot, float(row["strike"]), t, cp, q=q)
         solved.append(iv if iv is not None else 0.0)
+        sources.append(source or "unpriced")
+        cross_checked.append(source == "bid/ask mid" and iv is not None)
     out["impliedVolatility"] = solved
+    out["equityIvPriceSource"] = sources
+    out["equityIvCrossChecked"] = cross_checked
     return out

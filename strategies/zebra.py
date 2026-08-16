@@ -21,6 +21,8 @@ So: never assume deltas, always solve.
 """
 from __future__ import annotations
 
+import math
+
 from core.chain import iv_at
 from core.models import Context, Leg, Slice, Suggestion
 from core.pricing import bs_greeks, bs_price
@@ -94,7 +96,7 @@ def solve_long_strike(ctx: Context, slc: Slice, atm_strike: float) -> tuple[floa
                   "candidates": len(candidates),
                   "thin_grid": len(candidates) < MIN_CANDIDATES,
                   "degraded": best_err > DEGRADED_FRAC * target,
-                  "scan": table[:12]}
+                  "scan": sorted(table, key=lambda r: abs(r["net_extrinsic"]))[:12]}
 
 
 class Zebra(Strategy):
@@ -109,8 +111,32 @@ class Zebra(Strategy):
 
         atm = ctx.snap(ctx.spot)
         long_k, diag = solve_long_strike(ctx, slc, atm)
-        if long_k >= atm:
+        if long_k >= atm or diag["thin_grid"] or diag["degraded"]:
             return []
+
+        source = (ctx.data or {}).get("chain_source")
+        if source == "IBKR TWS" and not (ctx.data or {}).get("verified_zebra_quotes"):
+            return []
+
+        provenance: list[str]
+        if source == "yfinance":
+            exp = slc.expiry.isoformat()
+            prov = (ctx.data or {}).get("iv_curve_provenance", {}).get(exp, {})
+            long_src, atm_src = prov.get(long_k), prov.get(atm)
+            verified = {"bid/ask mid", "quoted IV cross-checked to bid/ask"}
+            if long_src not in verified or atm_src not in verified:
+                return []
+            provenance = [f"{long_k:g}C: {long_src}", f"{atm:g}C: {atm_src}"]
+        elif source == "IBKR TWS":
+            quotes = (ctx.data or {}).get("verified_zebra_quotes", {})
+            if not quotes.get((slc.expiry.isoformat(), long_k)) or not quotes.get(
+                    (slc.expiry.isoformat(), atm)):
+                return []
+            provenance = [f"{long_k:g}C: verified TWS quote",
+                          f"{atm:g}C: verified TWS quote"]
+        else:
+            provenance = [f"{long_k:g}C: synthetic/model input",
+                          f"{atm:g}C: synthetic/model input"]
 
         # Strategy.leg() stamps iv_at() onto the Leg, and every downstream
         # price, greek and breakeven is computed from that. Deep ITM it is the
@@ -119,7 +145,7 @@ class Zebra(Strategy):
                     iv=curve_iv(ctx, slc, long_k)),
                 Leg(cp="C", strike=atm, expiry=slc.expiry, qty=-1,
                     iv=curve_iv(ctx, slc, atm))]
-        if min(l.iv for l in legs) <= IV_FLOOR:
+        if min(l.iv for l in legs) <= IV_FLOOR or max(l.iv for l in legs) >= IV_CEIL:
             return []
         s = self.make(ctx, f"ZEBRA {long_k:g}/{atm:g}C {slc.dte}d", legs,
                       score=0.5, rationale=[], gamma_test=False)
@@ -130,6 +156,7 @@ class Zebra(Strategy):
         d_atm = bs_greeks(ctx.spot, atm, t, curve_iv(ctx, slc, atm),
                           "C", q=ctx.q)["delta"]
         net_delta = 2 * d_long - d_atm
+        s.max_profit = math.inf
         # Breakeven comes from struct_metrics, which walks the actual payoff.
         # The closed form 2K_long - K_short + debit is only valid ABOVE the
         # short strike, and silently returns a wrong number when the true
@@ -152,26 +179,21 @@ class Zebra(Strategy):
             f"leg at {d_long * 100:.0f} delta and the short leg at {d_atm * 100:.0f} delta; at "
             f"{slc.dte} days the ATM delta sits well above 50, which is the effect that "
             f"quietly erodes the 100-delta property.",
-            "Theta and vega are close to zero when the solve is clean, so this is "
-            "stock replacement rather than a premium position, and it needs "
-            "direction rather than time to pay.",
+            f"Computed theta is {s.greeks.get('theta', 0):+.2f} and computed vega is "
+            f"{s.greeks.get('vega', 0):+.2f}; neither exposure is assumed to be zero "
+            f"merely because current net extrinsic is small.",
         ]
-        if diag["degraded"] and diag["scan"]:
-            near = sorted(diag["scan"], key=lambda r: abs(r["net_extrinsic"]))[:3]
+        if ctx.q > 0 and long_k <= ctx.spot * 0.90:
             s.rationale.append(
-                "Closest strikes the solver could reach were "
-                + ", ".join("%g (net %+.2f)" % (r["strike"], r["net_extrinsic"])
-                            for r in near)
-                + ", so no listed strike lands near zero extrinsic at this tenor.")
-        if diag["thin_grid"]:
-            s.rationale.append(
-                f"Only {diag['candidates']} listed strikes sat below spot, so the strike "
-                f"was picked from a thin grid rather than genuinely solved, and the "
-                f"result should be re-checked against the live chain in TWS.")
+                "This deep-in-the-money dividend-paying equity call uses European "
+                "Black-Scholes Greeks, so American early-exercise and discrete-dividend "
+                "effects remain material and must be checked before entry.")
         s.manage = {
             "roll": f"Roll out before the position drops under 90 days to expiry.",
             "stop": "Close the whole structure on a decisive break of the entry thesis; "
                     "do not keep the long legs to give it room.",
         }
         s.evidence["solver"] = diag
+        s.evidence["leg_price_provenance"] = provenance
+        s.evidence["max_profit_unbounded"] = True
         return [s]

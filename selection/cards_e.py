@@ -97,11 +97,22 @@ def render(gate_e: dict, *, radar: dict | None = None,
         sections["STRUCTURE"].append(
             f"The recommended structure is {top['label']}, built as "
             f"{' / '.join(top['legs'])}.")
+        delta = (top.get("greeks") or {}).get("delta")
+        greek_text = (f", and net delta is {delta:.0f}" if delta is not None
+                      else ", while net delta is unavailable")
         sections["STRUCTURE"].append(
             f"Net {'debit' if top['net_mid'] > 0 else 'credit'} is "
             f"${abs(top['net_mid']) * 100:,.0f} per spread with maximum loss of "
-            f"${abs(top['max_loss']) * 100:,.0f}, and net delta is "
-            f"{top['greeks'].get('delta', 0):.0f}.")
+            f"${abs(top['max_loss']) * 100:,.0f}{greek_text}.")
+        greeks = top.get("greeks") or {}
+        if greeks.get("theta") is not None and greeks.get("vega") is not None:
+            sections["STRUCTURE"].append(
+                f"Computed theta is {greeks['theta']:+.2f} and computed vega is "
+                f"{greeks['vega']:+.2f}, so neither exposure is being assumed away.")
+        provenance = top.get("price_provenance") or []
+        if provenance:
+            sections["STRUCTURE"].append(
+                "Leg price provenance is " + "; ".join(provenance) + ".")
         if top.get("breakevens"):
             be = top["breakevens"][0]
             sections["STRUCTURE"].append(
@@ -126,9 +137,15 @@ def render(gate_e: dict, *, radar: dict | None = None,
                 f"valid while price holds above it on a closing basis.")
 
         # ----------------------------------------------------------- EXIT
-        sections["EXIT"].append(
-            "Take profit at 60% of maximum modelled value, before the nearest "
-            "short leg expires.")
+        if top.get("max_profit_unbounded"):
+            sections["EXIT"].append(
+                "The payoff is unbounded above the short strike, so take profit "
+                "against a return-on-debit target set at entry rather than a fictitious "
+                "percentage of maximum value.")
+        else:
+            sections["EXIT"].append(
+                "Take profit at 60% of the bounded maximum modelled value, before "
+                "the nearest short leg expires.")
         if trigger and trigger.get("level"):
             sections["EXIT"].append(
                 f"Stop out on a decisive close back below ${trigger['level']:.2f}, and "
@@ -157,12 +174,15 @@ def render(gate_e: dict, *, radar: dict | None = None,
     # -------------------------------------------------------------- FLAGS
     sections["FLAGS"] += list(gate_e.get("blocks", []))
     sections["FLAGS"] += list(gate_e.get("notes", []))
-    if governance:
+    if governance and governance.get("checked") is True:
         sections["FLAGS"] += list(governance.get("reasons", []))
+    else:
+        sections["FLAGS"].append(
+            "Portfolio governance was not checked, so the card makes no claim about "
+            "delta budget, correlation, account routing or margin capacity.")
     if not sections["FLAGS"]:
         sections["FLAGS"].append(
-            "No flags were raised, and the liquidity, headroom and portfolio "
-            "governance checks all passed.")
+            "No additional flags were raised by the checks that actually ran.")
 
     return {"header": _header(gate_e),
             "action": gate_e.get("action", "STAND ASIDE"),

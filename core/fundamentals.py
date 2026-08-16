@@ -25,7 +25,7 @@ OK, UNRATED = "OK", "UNRATED"
 # Gate thresholds — see docs/equity_leaps.md §3.1
 MAX_NET_DEBT_EBITDA = 3.5
 MIN_REVENUE_GROWTH = 0.0
-EPS_TREND_TOLERANCE = -0.005      # -0.5% over 90d still counts as "flat"
+EPS_TREND_TOLERANCE = 0.0
 
 SNAPSHOT_DIR = Path(os.environ.get("FVS_FUNDAMENTAL_DIR", "data/fundamentals"))
 
@@ -38,6 +38,7 @@ class Fundamentals:
     revenue_growth: float | None = None
     fcf: float | None = None
     operating_margin: float | None = None
+    operating_margin_previous: float | None = None
     net_debt_ebitda: float | None = None
     eps_fwd_current: float | None = None
     eps_fwd_90d: float | None = None
@@ -75,6 +76,26 @@ def _cell(frame, row_key: str, col):
 def _latest_col(frame):
     if frame is None or getattr(frame, "empty", True):
         return None
+
+
+def _row_values(frame, row_key: str) -> list[float]:
+    """Newest-first numeric statement values for one named row."""
+    if frame is None or getattr(frame, "empty", True):
+        return []
+    try:
+        idx = next(i for i in frame.index
+                   if str(i).strip().lower() == row_key.strip().lower())
+        cols = sorted(frame.columns, reverse=True)
+        return [v for c in cols if (v := _num(frame.loc[idx, c])) is not None]
+    except Exception:
+        return []
+
+
+def _ttm_pair(frame, row_key: str) -> tuple[float | None, float | None]:
+    values = _row_values(frame, row_key)
+    if len(values) < 8:
+        return None, None
+    return sum(values[:4]), sum(values[4:8])
     try:
         return frame.columns[0]
     except Exception:
@@ -133,8 +154,16 @@ def fetch_fundamentals(symbol: str, *, ticker=None) -> Fundamentals:
         except Exception:
             info = {}
 
-        f.revenue_growth = _num(info.get("revenueGrowth"))
-        f.operating_margin = _num(info.get("operatingMargins"))
+        quarterly = getattr(ticker, "quarterly_income_stmt", None)
+        revenue_ttm, revenue_prior = _ttm_pair(quarterly, "Total Revenue")
+        if revenue_ttm is not None and revenue_prior not in (None, 0):
+            f.revenue_growth = (revenue_ttm - revenue_prior) / abs(revenue_prior)
+
+        op_ttm, op_prior = _ttm_pair(quarterly, "Operating Income")
+        if revenue_ttm not in (None, 0) and op_ttm is not None:
+            f.operating_margin = op_ttm / revenue_ttm
+        if revenue_prior not in (None, 0) and op_prior is not None:
+            f.operating_margin_previous = op_prior / revenue_prior
         f.fcf = _num(info.get("freeCashflow"))
 
         if f.fcf is None:
@@ -146,8 +175,8 @@ def fetch_fundamentals(symbol: str, *, ticker=None) -> Fundamentals:
         ebitda = _num(info.get("ebitda"))
         total_debt = _num(info.get("totalDebt"))
         cash = _num(info.get("totalCash"))
-        if ebitda and ebitda > 0 and total_debt is not None:
-            f.net_debt_ebitda = (total_debt - (cash or 0.0)) / ebitda
+        if ebitda and ebitda > 0 and total_debt is not None and cash is not None:
+            f.net_debt_ebitda = (total_debt - cash) / ebitda
 
         f.eps_fwd_current, f.eps_fwd_90d, f.eps_trend_90d = _eps_trend(ticker)
         f.revisions_up_30d, f.revisions_down_30d = _revisions(ticker)
@@ -190,19 +219,29 @@ def fundamental_gates(f: Fundamentals) -> tuple[bool, list[str]]:
             f"not positive, so the business is shrinking rather than merely "
             f"de-rating.")
 
-    margin_ok = f.operating_margin is not None and f.operating_margin > 0
+    margin_ok = (f.operating_margin is not None
+                 and f.operating_margin_previous is not None
+                 and f.operating_margin > 0
+                 and f.operating_margin > f.operating_margin_previous)
     if not (f.fcf and f.fcf > 0) and not margin_ok:
         passed = False
         reasons.append(
-            "Free cash flow is not positive and operating margin is not "
-            "positive either, so there is no profitability floor under the "
-            "valuation.")
+            "Free cash flow is not positive and operating margin is not both "
+            "positive and improving, so there is no verified profitability "
+            "floor under the valuation.")
 
-    if f.net_debt_ebitda is not None and f.net_debt_ebitda > MAX_NET_DEBT_EBITDA:
+    if f.net_debt_ebitda is None:
         passed = False
         reasons.append(
-            f"Net debt to EBITDA is {f.net_debt_ebitda:.1f}x, above the {MAX_NET_DEBT_EBITDA}x "
-            f"ceiling, so a further drawdown carries balance-sheet risk on top "
+            "Net debt to EBITDA cannot be verified because debt, cash or positive "
+            "EBITDA is unavailable, so leverage is unknown and the balance-sheet "
+            "gate blocks the name.")
+    elif f.net_debt_ebitda >= MAX_NET_DEBT_EBITDA:
+        passed = False
+        reasons.append(
+            f"Net debt to EBITDA is {f.net_debt_ebitda:.1f}x, at or above the "
+            f"strict {MAX_NET_DEBT_EBITDA}x ceiling, so a further drawdown carries "
+            f"balance-sheet risk on top "
             f"of price risk.")
 
     if f.eps_trend_90d is not None and f.eps_trend_90d < EPS_TREND_TOLERANCE:
@@ -232,7 +271,21 @@ def snapshot(records: dict[str, Fundamentals], *, day: date | None = None,
     directory.mkdir(parents=True, exist_ok=True)
     day = day or date.today()
     path = directory / f"{day:%Y-%m}.jsonl"
-    with path.open("a", encoding="utf-8") as fh:
+    incoming = {(rec.symbol, day.isoformat()) for rec in records.values()}
+    retained: list[str] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                old = json.loads(line)
+            except json.JSONDecodeError:
+                retained.append(line)
+                continue
+            if (old.get("symbol"), old.get("snapshot_date")) not in incoming:
+                retained.append(line)
+
+    with path.open("w", encoding="utf-8") as fh:
+        for line in retained:
+            fh.write(line + "\n")
         for rec in records.values():
             row = rec.to_dict()
             row["snapshot_date"] = day.isoformat()

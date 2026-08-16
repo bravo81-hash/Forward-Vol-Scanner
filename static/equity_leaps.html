@@ -60,7 +60,7 @@ tr.pick:hover{background:#16203010}
   <h1>Equity LEAPS Engine</h1>
   <span class="sub">Radar-B · Gate E</span>
   <nav>
-    <a href="/">Last Hour</a><a href="/stocks">Stock Radar</a>
+    <a href="/last-hour">Last Hour</a><a href="/stocks">Stock Radar</a>
     <a href="/patterns">Pattern Scanner</a><a href="/value-puts">Value Puts</a>
     <a href="/research">Research</a><a href="/campaigns">Campaign Lab</a>
   </nav>
@@ -75,8 +75,8 @@ tr.pick:hover{background:#16203010}
         <option value="medium" selected>Medium · 4-6 weeks</option>
         <option value="long">Long · months (LEAPS)</option>
       </select></div>
-    <div><label>Trigger fired</label>
-      <select id="trig"><option value="0">No</option><option value="1">Yes</option></select></div>
+    <div><label>Verify reclaim trigger</label>
+      <select id="trig"><option value="0">Not requested</option><option value="1">Verify now</option></select></div>
     <div><label>Data</label>
       <select id="src">
         <option value="auto" selected>Auto · TWS then yfinance</option>

@@ -5,9 +5,8 @@ Runs after Friday's US close has settled. Refreshes fundamentals, snapshots
 them point-in-time, runs Radar-B, attaches a provisional Gate E structure to
 each survivor, renders cards, and writes JSON for the Today screen.
 
-Delivery is PULL-based: this writes a file the app reads. No Telegram, no
-push service. Set --email to send yourself a copy via local SMTP if you want
-one, but the app view is the primary surface.
+Delivery is PULL-based: this writes a JSON file. No Telegram, email or push
+service is used by this subsystem.
 
 The output is a WATCHLIST with armed triggers, not a set of orders. Nothing
 should be entered Monday on the strength of a Saturday ranking — the

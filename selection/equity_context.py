@@ -28,6 +28,14 @@ from datetime import date, datetime
 
 from core.models import Context
 
+
+class EquityDataError(RuntimeError):
+    """The upstream response is incomplete enough that trading must stop."""
+
+
+class EquityThrottleError(EquityDataError):
+    """The upstream explicitly reported a pacing/rate-limit condition."""
+
 WINDOWS = {"short": (3, 45), "medium": (14, 120), "long": (90, 500)}
 TARGETS = {"short": 14, "medium": 45, "long": 300}
 
@@ -54,8 +62,28 @@ MAX_SLICES = 3
 _CACHE = {}
 
 
+def _is_throttle_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status_code", None)
+    return (status == 429 or response_status == 429
+            or type(exc).__name__ in {"YFRateLimitError", "RateLimitError"})
+
+
 def window_for(hold: str) -> tuple[int, int]:
     return WINDOWS.get(hold, WINDOWS["medium"])
+
+
+def _set_comparison_iv(ctx: Context, hold: str) -> None:
+    """Compare RV with ATM IV at the requested hold, not an extrapolated 30 DTE."""
+    slc = ctx.slice_near(TARGETS.get(hold, 45))
+    if slc is None or not slc.atm_iv:
+        ctx.regime["iv30"] = None
+        ctx.data["iv_comparison_dte"] = None
+        return
+    ctx.regime["iv30"] = slc.atm_iv * 100.0
+    ctx.data["iv_comparison_dte"] = slc.dte
+    ctx.data["iv_comparison_metric"] = "ATM IV at requested hold tenor"
 
 
 def _cached(key, fn):
@@ -74,19 +102,29 @@ def clear_cache() -> None:
 
 def _retry(fn, what: str):
     """Retry through yfinance throttling. An empty response counts as failure."""
-    last, delay = None, BACKOFF
+    last, last_exc, delay = None, None, BACKOFF
     for attempt in range(RETRIES):
         try:
             out = fn()
             if out:
                 return out
             last = "%s: empty response (attempt %d)" % (what, attempt + 1)
+            last_exc = EquityDataError(last)
+        except EquityThrottleError as exc:
+            last_exc = exc
+            last = str(exc)
         except Exception as exc:                     # noqa: BLE001
-            last = "%s: %s: %s" % (what, type(exc).__name__, exc)
+            if _is_throttle_error(exc):
+                last_exc = EquityThrottleError(
+                    "%s: upstream rate limit (%s)" % (what, type(exc).__name__))
+            else:
+                last_exc = EquityDataError(
+                    "%s: %s: %s" % (what, type(exc).__name__, exc))
+            last = str(last_exc)
         if attempt < RETRIES - 1:
             time.sleep(delay)
             delay *= 2
-    raise RuntimeError(last or ("%s: no data" % what))
+    raise last_exc or EquityDataError(last or ("%s: no data" % what))
 
 
 def probe_expiries(symbol: str, today: date) -> list[tuple[str, int]]:
@@ -133,6 +171,8 @@ def build_live(symbol: str, hold: str, today: date):
     ctx = build_context(symbol, "live", today=today,
                         dte_range=(lo, hi), strike_band=LIVE_STRIKE_BAND)
     ctx.data["chain_source"] = "IBKR TWS"
+    ctx.data["volatility_inputs_verified"] = (
+        ctx.data.get("surface_source") == "live TWS IV")
     return ctx
 
 
@@ -146,17 +186,22 @@ def build(symbol: str, hold: str = "medium", *, today=None, source: str = "auto"
     from core.events import trading_today
     from core.stock_data import histories_yf
 
+    source = source.lower().strip()
+    if source not in {"auto", "live", "yf"}:
+        raise ValueError("source must be one of auto, live or yf")
     today = today or trading_today()
 
     # TWS first when it is reachable. Falling back rather than failing means a
     # closed TWS degrades the data quality instead of the feature.
     if source in ("auto", "live"):
         try:
-            ctx = _cached(("live", symbol, hold),
+            ctx = _cached(("live", symbol, hold, today.isoformat()),
                           lambda: build_live(symbol, hold, today))
             bars = histories_yf([symbol], period="2y").get(symbol, [])
+            _set_comparison_iv(ctx, hold)
             ctx.data["strikes_below_spot"] = sum(1 for k in ctx.strikes
                                                  if k < ctx.spot)
+            _LIVE_ERRORS.pop(symbol, None)
             return ctx, bars
         except Exception as exc:                     # noqa: BLE001
             if source == "live":
@@ -168,9 +213,9 @@ def build(symbol: str, hold: str = "medium", *, today=None, source: str = "auto"
     in_window = [e for e in expiries if lo <= e[1] <= hi]
     shortfall = None
 
-    if len(in_window) < 2:
+    if not in_window:
         widest = [e for e in expiries if e[1] >= 5]
-        if len(widest) < 2:
+        if not widest:
             raise RuntimeError("%s: only %d expiries listed, none usable"
                                % (symbol, len(expiries)))
         in_window = widest
@@ -186,11 +231,13 @@ def build(symbol: str, hold: str = "medium", *, today=None, source: str = "auto"
                     key=lambda e: e[1])
     lo, hi = chosen[0][1] - 1, chosen[-1][1] + 1
 
-    ctx = _cached(("ctx", symbol, hold, lo, hi),
+    chosen_expiries = tuple(e[0] for e in chosen)
+    ctx = _cached(("ctx", symbol, hold, lo, hi, chosen_expiries),
                   lambda: _retry(
-                      lambda: _context(symbol, today, (lo, hi)),
+                      lambda: _context(symbol, today, (lo, hi), chosen_expiries),
                       "%s chains %d-%dd" % (symbol, lo, hi)))
     bars = histories_yf([symbol], period="2y").get(symbol, [])
+    _set_comparison_iv(ctx, hold)
 
     if shortfall:
         ctx.data["tenor_shortfall"] = shortfall
@@ -211,50 +258,146 @@ def build(symbol: str, hold: str = "medium", *, today=None, source: str = "auto"
     ctx.data["expiries_listed"] = len(expiries)
     ctx.data["chains_fetched"] = len(chosen)
     ctx.data["chain_source"] = "yfinance"
-    if symbol in _LIVE_ERRORS:
+    if source == "auto" and symbol in _LIVE_ERRORS:
         ctx.data["live_unavailable"] = _LIVE_ERRORS[symbol]
+    else:
+        ctx.data.pop("live_unavailable", None)
     return ctx, bars
 
 
 
-def _context(symbol: str, today: date, window: tuple[int, int]):
-    """build_context_yf, but with slice IVs solved from mid prices.
-
-    Yahoo's impliedVolatility column is unusable on LEAPS, so the frames are
-    repaired before core.yf_client sees them. Everything else - ATM selection,
-    the 25-delta wings, spread and open interest - is yf_client's own logic,
-    reused unchanged.
-    """
+def _context(symbol: str, today: date, window: tuple[int, int],
+             allowed_expiries: tuple[str, ...] | None = None):
+    """Thread-safe equity-only yfinance context with repaired option IVs."""
     import core.yf_client as yfc
+    import yfinance as yf
+    from core.events import event_flags
     from core.iv_solve import repair_iv
     from core.pricing import q_for
+    from core.regime import build_gates, compute_regime
+    from core.surface import FRONT_DTE, iv_cm, pair_table, term_stats
 
-    original = yfc._slice_from_chain
+    symbol = symbol.upper()
+    fetch = yfc.PROXY.get(symbol, symbol)
     qdiv = q_for(symbol)
-    curves: dict = {}
+    tk = yf.Ticker(fetch)
 
-    def patched(expiry, dte, spot, calls, puts, q):
-        t = max(dte, 1) / 365.0
-        rc = repair_iv(calls, spot, t, "C", q=qdiv)
-        rp = repair_iv(puts, spot, t, "P", q=qdiv)
-        # Keep the whole solved call curve. core.chain.iv_at interpolates from
-        # only three anchors (ATM and the two 25-delta wings), which distorts
-        # extrinsic away from those points - and the ZEBRA solver lives deep
-        # ITM, far from all three.
+    try:
+        hist = tk.history(period="400d", auto_adjust=False)
+    except Exception as exc:
+        if _is_throttle_error(exc):
+            raise EquityThrottleError(f"{symbol}: price-history rate limit") from exc
+        raise
+    if hist is None or len(hist) < 120:
+        raise EquityDataError(f"{symbol}: insufficient yfinance price history")
+    bars = [(idx.date() if hasattr(idx, "date") else idx,
+             float(row["Open"]), float(row["High"]), float(row["Low"]),
+             float(row["Close"])) for idx, row in hist.iterrows()]
+    spot = bars[-1][4]
+
+    curves: dict = {}
+    provenance: dict = {}
+    slices = []
+    chain_failures: list[Exception] = []
+    surface_verified = True
+    try:
+        options = list(tk.options or [])
+    except Exception as exc:
+        if _is_throttle_error(exc):
+            raise EquityThrottleError(f"{symbol}: expiry-list rate limit") from exc
+        raise
+    if not options:
+        raise EquityDataError(f"{symbol}: empty expiry response")
+
+    allowed = set(allowed_expiries or ())
+    for exp in options:
+        if allowed and exp not in allowed:
+            continue
         try:
+            expiry = datetime.strptime(exp, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        dte = (expiry - today).days
+        if not window[0] <= dte <= window[1]:
+            continue
+        try:
+            chain = tk.option_chain(exp)
+            if chain.calls is None or chain.puts is None or chain.calls.empty or chain.puts.empty:
+                raise EquityDataError(f"{symbol} {exp}: empty option chain")
+            t = max(dte, 1) / 365.0
+            rc = repair_iv(chain.calls, spot, t, "C", q=qdiv)
+            rp = repair_iv(chain.puts, spot, t, "P", q=qdiv)
+            slc = yfc._slice_from_chain(expiry, dte, spot, rc, rp, qdiv)
+            if slc is None:
+                raise EquityDataError(f"{symbol} {exp}: no cross-checked ATM IV")
+            verified_sources = {"bid/ask mid", "quoted IV cross-checked to bid/ask"}
+            anchor_sources = []
+            for frame in (rc, rp):
+                match = frame[frame["strike"] == slc.atm_strike]
+                if not match.empty:
+                    anchor_sources.append(str(match.iloc[0].get("equityIvPriceSource")))
+            if len(anchor_sources) < 2 or any(s not in verified_sources
+                                               for s in anchor_sources):
+                surface_verified = False
             curves[expiry.isoformat()] = {
                 float(r["strike"]): float(r["impliedVolatility"])
                 for _, r in rc.iterrows()
                 if r.get("impliedVolatility") and float(r["impliedVolatility"]) > 0}
-        except Exception:                            # noqa: BLE001
-            pass
-        return original(expiry, dte, spot, rc, rp, q)
+            provenance[expiry.isoformat()] = {
+                float(r["strike"]): str(r.get("equityIvPriceSource") or "unpriced")
+                for _, r in rc.iterrows()
+                if r.get("impliedVolatility") and float(r["impliedVolatility"]) > 0}
+            slices.append(slc)
+        except Exception as exc:                    # noqa: BLE001
+            if isinstance(exc, EquityThrottleError) or _is_throttle_error(exc):
+                raise EquityThrottleError(f"{symbol} {exp}: option-chain rate limit") from exc
+            chain_failures.append(exc)
 
-    yfc._slice_from_chain = patched
-    try:
-        ctx = yfc.build_context_yf(symbol, today=today, dte_range=window)
-    finally:
-        yfc._slice_from_chain = original
-    ctx.data["iv_source"] = "solved from mid where quoted IV was implausible"
+    if not slices:
+        detail = type(chain_failures[-1]).__name__ if chain_failures else "no expiry in window"
+        raise EquityDataError(f"{symbol}: no usable cross-checked option chain ({detail})")
+    slices.sort(key=lambda s: s.dte)
+
+    iv30 = iv_cm(slices, 30) * 100
+    ivh: list[float] = []
+    ivp_src = "none - IV30/HAR proxy band"
+    vix_sym = yfc.IVH_PROXY.get(symbol)
+    if vix_sym:
+        try:
+            vh = yf.Ticker(vix_sym).history(period="1y")
+            ivh = [float(c) for c in vh["Close"].tolist()
+                   if yfc._num(c)]
+            if len(ivh) >= 60:
+                ivp_src = f"{vix_sym} history (index IV proxy)"
+            else:
+                ivh = []
+        except Exception:
+            ivh = []
+
+    reg = compute_regime(bars, ivh, iv30)
+    reg["spot"] = spot
+    reg["ivp_src"] = ivp_src
+    if not ivh:
+        reg["ivp_proxy"] = True
+
+    lo, hi = spot * 0.8, spot * 1.2
+    strikes = sorted({k for s in slices
+                      for k in (s.atm_strike, s.put25_strike, s.call25_strike)
+                      if lo <= k <= hi})
+    ev = event_flags(today, symbol, FRONT_DTE[1])
+    last = bars[-1][0]
+    gap = (today - last).days
+    ctx = Context(symbol=symbol, spot=spot, today=today, slices=slices,
+                  strikes=strikes, regime=reg, events=ev,
+                  gates=build_gates(reg, ev, today), mode="yf", q=qdiv,
+                  data={"session": str(last), "fresh": gap <= 4,
+                        "gap_days": gap,
+                        "note": f"yfinance delayed data; IVR src: {ivp_src}"})
+    ctx.pairs = pair_table(slices, today)
+    ctx.regime["term"] = term_stats(slices)
+    ctx.data["iv_source"] = "per-row bid/ask cross-check with explicit fallback provenance"
     ctx.data["iv_curve"] = curves
+    ctx.data["iv_curve_provenance"] = provenance
+    ctx.data["option_chain_failures"] = len(chain_failures)
+    ctx.data["volatility_inputs_verified"] = surface_verified
     return ctx

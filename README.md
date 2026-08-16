@@ -46,7 +46,7 @@ python pattern_scan.py --source mock --limit 30
 python webapp.py
 ```
 
-Then open `http://127.0.0.1:8765/patterns`, select **Practice**, and run the
+Then open `http://127.0.0.1:8790/patterns`, select **Practice**, and run the
 scan. For real daily data select **Yahoo daily**. During 15:00–15:40 ET, with
 TWS running, use **Validate finalists with TWS**; TWS is never used to crawl
 the full historical universe.
@@ -135,7 +135,7 @@ Run the desk and open it directly:
 ```text
 radar.bat
 # or
-python webapp.py            # -> http://127.0.0.1:8765/stocks
+python webapp.py            # -> http://127.0.0.1:8790/stocks
 ```
 
 While `webapp.py` is running, an internal New-York-time scheduler attempts the
@@ -156,7 +156,7 @@ entire scan/flash/stage-preview flow without TWS or a live order.
 ### GitHub Codespaces practice test
 
 Create the Codespace from the radar branch.  Its dev-container installs the
-requirements and forwards port 8765 automatically.  In the terminal run:
+requirements and forwards port 8790 automatically.  In the terminal run:
 
 ```text
 python webapp.py
@@ -252,7 +252,7 @@ limit, and a failed live scan identifies the connection or market-data stage.
 ## Run
 ```
 pip install -r requirements.txt
-python webapp.py            # -> http://127.0.0.1:8765
+python webapp.py            # -> http://127.0.0.1:8790
 ```
 Historical OptionNet mode works with no TWS. Live mode expects TWS on 127.0.0.1:7496
 (edit `core/ib_client.py`).
