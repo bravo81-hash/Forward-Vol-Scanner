@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""webapp.py — TE Playbook trade-selection app (browser UI on :8765).
+"""webapp.py — TE Playbook trade-selection app (browser UI on :8799).
 
 Per ticker: market context -> regime verdict -> top-2 strategy families ->
 4 concrete suggestion cards -> stage to TWS (transmit=False) with whatIf
@@ -46,6 +46,6 @@ if __name__ == "__main__":
     if scheduler_enabled():
         RadarScheduler().start()
     host = os.getenv("FVS_WEB_HOST", "127.0.0.1")
-    port = int(os.getenv("FVS_WEB_PORT", "8765"))
+    port = int(os.getenv("FVS_WEB_PORT", "8799"))
     print(f"TE Playbook app -> http://{host}:{port}   (mock mode needs no TWS)")
     serve(host, port)

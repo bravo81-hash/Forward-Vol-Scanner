@@ -26,7 +26,7 @@ is disabled until matched-date and forward evidence validate those rules.
 
 ```powershell
 python webapp.py
-# http://127.0.0.1:8765/x4
+# http://127.0.0.1:8799/x4
 ```
 
 ## Value Entry Put Scanner
@@ -72,7 +72,7 @@ Quick test:
 ```powershell
 python -m pytest tests/test_value_put.py -q
 python webapp.py
-# http://127.0.0.1:8765/value-puts
+# http://127.0.0.1:8799/value-puts
 ```
 
 ## Price-Action Pattern Scanner
@@ -121,7 +121,7 @@ python pattern_scan.py --source mock --limit 30
 python webapp.py
 ```
 
-Then open `http://127.0.0.1:8765/patterns`, select **Practice**, and run the
+Then open `http://127.0.0.1:8799/patterns`, select **Practice**, and run the
 scan. For real daily data select **Yahoo daily**. During 15:00–15:40 ET, with
 TWS running, use **Validate finalists with TWS**; TWS is never used to crawl
 the full historical universe.
@@ -210,7 +210,7 @@ Run the desk and open it directly:
 ```text
 radar.bat
 # or
-python webapp.py            # -> http://127.0.0.1:8765/stocks
+python webapp.py            # -> http://127.0.0.1:8799/stocks
 ```
 
 While `webapp.py` is running, an internal New-York-time scheduler attempts the
@@ -231,7 +231,7 @@ entire scan/flash/stage-preview flow without TWS or a live order.
 ### GitHub Codespaces practice test
 
 Create the Codespace from the radar branch.  Its dev-container installs the
-requirements and forwards port 8765 automatically.  In the terminal run:
+requirements and forwards port 8799 automatically.  In the terminal run:
 
 ```text
 python webapp.py
@@ -327,7 +327,7 @@ limit, and a failed live scan identifies the connection or market-data stage.
 ## Run
 ```
 pip install -r requirements.txt
-python webapp.py            # -> http://127.0.0.1:8765
+python webapp.py            # -> http://127.0.0.1:8799
 ```
 `webapp.py` serves through waitress when it is installed (`pip install -r
 requirements-live.txt`) and falls back to the Flask development server with a
